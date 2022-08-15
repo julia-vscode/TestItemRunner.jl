@@ -27,6 +27,22 @@ function compute_line_column(content, target_pos)
     return line, column
 end
 
+@testitem "compute_line_column" begin
+    using Test, TestItemRunner
+
+    content = "abc\ndef\nghi"
+
+    @test TestItemRunner.compute_line_column(content, 1) == (1,1)
+    @test TestItemRunner.compute_line_column(content, 2) == (1,2)
+    @test TestItemRunner.compute_line_column(content, 3) == (1,3)
+    @test TestItemRunner.compute_line_column(content, 5) == (2,1)
+    @test TestItemRunner.compute_line_column(content, 6) == (2,2)
+    @test TestItemRunner.compute_line_column(content, 7) == (2,3)
+    @test TestItemRunner.compute_line_column(content, 9) == (3,1)
+    @test TestItemRunner.compute_line_column(content, 10) == (3,2)
+    @test TestItemRunner.compute_line_column(content, 11) == (3,3)
+end
+
 function find_test_items_detail!(filename, content, node, testitems)
     node isa EXPR || return
 
