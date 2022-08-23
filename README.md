@@ -16,8 +16,6 @@ In the framework of this package, you write your tests inside `@testitem` macros
 
 ```julia
 @testitem "First tests" begin
-    using Test, MyPackage
-
     x = foo("bar")
 
     @test length(x)==3
@@ -25,7 +23,7 @@ In the framework of this package, you write your tests inside `@testitem` macros
 end
 ```
 
-Note how the first argument to the `@testitem` macro is a name for the test item, followed by a `begin end` block that contains the actual test code. Inside the test code, we first load the Test standard library package and our own package that we want to test, then run some code from our package and finally use the standard base library `@test` macros to test whether our function returns the correct results.
+Note how the first argument to the `@testitem` macro is a name for the test item, followed by a `begin end` block that contains the actual test code. Note that you do not need to load the `Test` package nor the package you are testing, both of these are automatically loaded into the `@testitem`. Inside the test code, we first  run some code from our package and finally use the standard base library `@test` macros to test whether our function returns the correct results.
 
 You can put `@testitem` macros into any *.jl Julia file in your package, even next to the functions that you are testing, or more traditionally into Julia files in your `test` folder. 
 
@@ -43,8 +41,6 @@ function foo(x)
 end
 
 @testitem "Test for foo" begin
-    using Test, MyPackage
-
     x = foo("bar")
 
     @test x == "barbar"
@@ -61,8 +57,6 @@ You can also place `@testitem`s in test files inside your `test` folder (or any 
 
 ```julia
 @testitem "Another test for foo" begin
-    using Test, MyPackage
-
     x = foo("bar")
 
     @test x != "bar"

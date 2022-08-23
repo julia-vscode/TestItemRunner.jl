@@ -1,6 +1,6 @@
 module TestItemRunner
 
-import CSTParser, Test, TestItems
+import CSTParser, Test, TestItems, TOML
 using CSTParser: EXPR, parentof, headof
 using TestItems: @testitem
 
@@ -28,8 +28,6 @@ function compute_line_column(content, target_pos)
 end
 
 @testitem "compute_line_column" begin
-    using Test, TestItemRunner
-
     content = "abc\ndef\nghi"
 
     @test TestItemRunner.compute_line_column(content, 1) == (1, 1)
@@ -62,8 +60,16 @@ function find_test_items_detail!(filename, content, node, testitems)
     end
 end
 
-function run_testitem(filepath, original_code, line, column)
+function run_testitem(filepath, use_default_usings, package_name, original_code, line, column)
     mod = Core.eval(Main, :(module Testmodule end))
+
+    if use_default_usings
+        Core.eval(mod, :(using Test))
+
+        if package_name!=""
+            Core.eval(mod, :(using $(Symbol(package_name))))
+        end
+    end
 
     code_without_begin_end = strip(original_code)[6:end-3]
     code = string('\n'^line, ' '^column, code_without_begin_end)
@@ -76,6 +82,18 @@ function run_testitem(filepath, original_code, line, column)
 end
 
 function run_tests(path)
+    # Find package name
+    package_name = ""
+    package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
+    if package_filename!==nothing
+        try
+            project_content = TOML.parsefile(package_filename)
+
+            package_name = get(project_content, "name", "")
+        catch
+        end
+    end
+
     # Find all Julia files in this folder and sub folders
     julia_files = String[]
     for (root, _, files) in walkdir(path)
@@ -109,7 +127,7 @@ function run_tests(path)
         Test.push_testset(Test.DefaultTestSet(relpath(file, path)))
         for testitem in testitems
             Test.push_testset(Test.DefaultTestSet(testitem.name))
-            run_testitem(testitem.filename, testitem.code, testitem.line, testitem.column)
+            run_testitem(testitem.filename, true, package_name, testitem.code, testitem.line, testitem.column)
             Test.finish(Test.pop_testset())
         end
         Test.finish(Test.pop_testset())
