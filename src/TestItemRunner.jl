@@ -60,7 +60,7 @@ end
 end
 
 function run_testitem(filepath, use_default_usings, package_name, original_code, line, column)
-    mod = Core.eval(Main, :(module Testmodule end))
+    mod = Core.eval(Main, :(module $(gensym()) end))
 
     if use_default_usings
         Core.eval(mod, :(using Test))
