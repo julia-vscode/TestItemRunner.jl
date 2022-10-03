@@ -118,14 +118,14 @@ function run_tests(path; filter=nothing)
         end
 
         if length(testitems_for_file) > 0
-            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, tags=i.option_tags, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
+            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
         end
     end
 
     # Filter @testitems
     if filter !== nothing
         for file in keys(testitems)     
-            testitems[file] = Base.filter(i -> filter((filename=file, name=i.name, tags=i.tags)), testitems[file])
+            testitems[file] = Base.filter(i -> filter((filename=file, name=i.name, tags=i.option_tags)), testitems[file])
         end
     end
 
@@ -135,7 +135,7 @@ function run_tests(path; filter=nothing)
         Test.push_testset(Test.DefaultTestSet(relpath(file, path)))
         for testitem in testitems
             Test.push_testset(Test.DefaultTestSet(testitem.name))
-            run_testitem(testitem.filename, true, package_name, testitem.code, testitem.line, testitem.column)
+            run_testitem(testitem.filename, testitem.option_default_imports, package_name, testitem.code, testitem.line, testitem.column)
             Test.finish(Test.pop_testset())
         end
         Test.finish(Test.pop_testset())
