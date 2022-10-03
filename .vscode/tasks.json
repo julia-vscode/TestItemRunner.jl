@@ -5,18 +5,24 @@
     "tasks": [
         {
             "label": "Pull latest version of CSTParser",
-            "type": "shell",
-            "command": "git subtree pull --prefix packages/CSTParser https://github.com/julia-vscode/CSTParser.jl master --squash"
+            "type": "process",
+            "command": "git",
+            "args": ["subtree", "pull", "--prefix", "packages/CSTParser", "https://github.com/julia-vscode/CSTParser.jl", "enable-vendoring", "--squash"],
+            "problemMatcher": []
         },
         {
             "label": "Pull latest version of TestItemDetection",
-            "type": "shell",
-            "command": "git subtree pull --prefix packages/TestItemDetection https://github.com/julia-vscode/TestItemDetection.jl main --squash"
+            "type": "process",
+            "command": "git",
+            "args": ["subtree", "pull", "--prefix", "packages/TestItemDetection", "https://github.com/julia-vscode/TestItemDetection.jl", "main", "--squash"],
+            "problemMatcher": []
         },
         {
             "label": "Pull latest version of Tokenize",
-            "type": "shell",
-            "command": "git subtree pull --prefix packages/Tokenize https://github.com/JuliaLang/Tokenize.jl master --squash"
+            "type": "process",
+            "command": "git",
+            "args": ["subtree", "pull", "--prefix", "packages/Tokenize", "https://github.com/JuliaLang/Tokenize.jl", "master", "--squash"],
+            "problemMatcher": []
         }
     ]
 }
