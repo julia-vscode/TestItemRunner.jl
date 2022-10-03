@@ -11,6 +11,13 @@ module CSTParser
     include("../packages/CSTParser/src/packagedef.jl")
 end
 
+module TestItemDetection
+    import ..CSTParser
+    using ..CSTParser: EXPR
+
+    include("../packages/TestItemDetection/src/packagedef.jl")
+end
+
 import .CSTParser, Test, TestItems, TOML
 using .CSTParser: EXPR, parentof, headof
 using TestItems: @testitem
@@ -35,40 +42,21 @@ function compute_line_column(content, target_pos)
         pos = nextind(content, pos)
     end
 
-    return line, column
+    return (line=line, column=column)
 end
 
 @testitem "compute_line_column" begin
     content = "abc\ndef\nghi"
 
-    @test TestItemRunner.compute_line_column(content, 1) == (1, 1)
-    @test TestItemRunner.compute_line_column(content, 2) == (1, 2)
-    @test TestItemRunner.compute_line_column(content, 3) == (1, 3)
-    @test TestItemRunner.compute_line_column(content, 5) == (2, 1)
-    @test TestItemRunner.compute_line_column(content, 6) == (2, 2)
-    @test TestItemRunner.compute_line_column(content, 7) == (2, 3)
-    @test TestItemRunner.compute_line_column(content, 9) == (3, 1)
-    @test TestItemRunner.compute_line_column(content, 10) == (3, 2)
-    @test TestItemRunner.compute_line_column(content, 11) == (3, 3)
-end
-
-function find_test_items_detail!(filename, content, node, testitems)
-    node isa EXPR || return
-
-    if node.head == :macrocall && length(node.args) == 4 && CSTParser.valof(node.args[1]) == "@testitem"
-
-        pos = get_file_loc(node.args[4])[2]
-
-        loc = pos:pos+node.args[4].span
-
-        line, column = compute_line_column(content, pos)
-
-        push!(testitems, (filename=filename, code=content[loc], name=CSTParser.valof(node.args[3]), line=line - 1, column=column))
-    elseif node.head == :module && length(node.args) >= 3 && node.args[3] isa EXPR && node.args[3].head == :block
-        for i in node.args[3].args
-            find_test_items_detail!(filename, content, i, testitems)
-        end
-    end
+    @test TestItemRunner.compute_line_column(content, 1) == (line=1, column=1)
+    @test TestItemRunner.compute_line_column(content, 2) == (line=1, column=2)
+    @test TestItemRunner.compute_line_column(content, 3) == (line=1, column=3)
+    @test TestItemRunner.compute_line_column(content, 5) == (line=2, column=1)
+    @test TestItemRunner.compute_line_column(content, 6) == (line=2, column=2)
+    @test TestItemRunner.compute_line_column(content, 7) == (line=2, column=3)
+    @test TestItemRunner.compute_line_column(content, 9) == (line=3, column=1)
+    @test TestItemRunner.compute_line_column(content, 10) == (line=3, column=2)
+    @test TestItemRunner.compute_line_column(content, 11) == (line=3, column=3)
 end
 
 function run_testitem(filepath, use_default_usings, package_name, original_code, line, column)
@@ -82,17 +70,14 @@ function run_testitem(filepath, use_default_usings, package_name, original_code,
         end
     end
 
-    code_without_begin_end = strip(original_code)[6:end-3]
-    code = string('\n'^line, ' '^column, code_without_begin_end)
-
-
+    code = string('\n'^line, ' '^column, original_code)
 
     withpath(filepath) do
         Base.invokelatest(include_string, mod, code, filepath)
     end
 end
 
-function run_tests(path)
+function run_tests(path; filter=nothing)
     # Find package name
     package_name = ""
     package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
@@ -123,12 +108,24 @@ function run_tests(path)
         cst = CSTParser.parse(content, true)
 
         testitems_for_file = []
+        errors_for_file = []
         for i in cst.args
-            find_test_items_detail!(file, content, i, testitems_for_file)
+            TestItemDetection.find_test_items_detail!(i, testitems_for_file, errors_for_file)
+        end
+
+        if length(errors_for_file) > 0
+            error("There is an error in your test item definition, we are aborting.")
         end
 
         if length(testitems_for_file) > 0
-            testitems[file] = testitems_for_file
+            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, tags=i.option_tags, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
+        end
+    end
+
+    # Filter @testitems
+    if filter !== nothing
+        for file in keys(testitems)     
+            testitems[file] = Base.filter(i -> filter((filename=file, name=i.name, tags=i.tags)), testitems[file])
         end
     end
 
@@ -147,8 +144,18 @@ function run_tests(path)
     Test.finish(ts)
 end
 
-macro run_package_tests()
-    :(run_tests(joinpath($(dirname(string(__source__.file))), "..")))
+macro run_package_tests(ex...)
+    kwargs = []
+    
+    for i in ex
+        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1]==:filter
+            push!(kwargs, esc(i))
+        else
+            error("Invalid argument")
+        end
+    end
+
+    :(run_tests(joinpath($(dirname(string(__source__.file))), ".."); $(kwargs...)))
 end
 
 end
