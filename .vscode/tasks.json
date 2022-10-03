@@ -1,0 +1,22 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Pull latest version of CSTParser",
+            "type": "shell",
+            "command": "git subtree pull --prefix packages/CSTParser https://github.com/julia-vscode/CSTParser.jl master --squash"
+        },
+        {
+            "label": "Pull latest version of TestItemDetection",
+            "type": "shell",
+            "command": "git subtree pull --prefix packages/TestItemDetection https://github.com/julia-vscode/TestItemDetection.jl main --squash"
+        },
+        {
+            "label": "Pull latest version of Tokenize",
+            "type": "shell",
+            "command": "git subtree pull --prefix packages/Tokenize https://github.com/JuliaLang/Tokenize.jl master --squash"
+        }
+    ]
+}
