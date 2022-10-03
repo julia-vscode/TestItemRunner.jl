@@ -1,7 +1,18 @@
 module TestItemRunner
 
-import CSTParser, Test, TestItems, TOML
-using CSTParser: EXPR, parentof, headof
+include("../packages/Tokenize/src/Tokenize.jl")
+
+module CSTParser
+    using ..Tokenize
+    import ..Tokenize.Tokens
+    import ..Tokenize.Tokens: RawToken, AbstractToken, iskeyword, isliteral, isoperator, untokenize
+    import ..Tokenize.Lexers: Lexer, peekchar, iswhitespace
+
+    include("../packages/CSTParser/src/packagedef.jl")
+end
+
+import .CSTParser, Test, TestItems, TOML
+using .CSTParser: EXPR, parentof, headof
 using TestItems: @testitem
 
 include("vendored_code.jl")
