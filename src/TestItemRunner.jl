@@ -3,19 +3,19 @@ module TestItemRunner
 include("../packages/Tokenize/src/Tokenize.jl")
 
 module CSTParser
-    using ..Tokenize
-    import ..Tokenize.Tokens
-    import ..Tokenize.Tokens: RawToken, AbstractToken, iskeyword, isliteral, isoperator, untokenize
-    import ..Tokenize.Lexers: Lexer, peekchar, iswhitespace, readchar, emit, emit_error,  accept_batch, eof
+using ..Tokenize
+import ..Tokenize.Tokens
+import ..Tokenize.Tokens: RawToken, AbstractToken, iskeyword, isliteral, isoperator, untokenize
+import ..Tokenize.Lexers: Lexer, peekchar, iswhitespace, readchar, emit, emit_error, accept_batch, eof
 
-    include("../packages/CSTParser/src/packagedef.jl")
+include("../packages/CSTParser/src/packagedef.jl")
 end
 
 module TestItemDetection
-    import ..CSTParser
-    using ..CSTParser: EXPR
+import ..CSTParser
+using ..CSTParser: EXPR
 
-    include("../packages/TestItemDetection/src/packagedef.jl")
+include("../packages/TestItemDetection/src/packagedef.jl")
 end
 
 import .CSTParser, Test, TestItems, TOML
@@ -65,7 +65,7 @@ function run_testitem(filepath, use_default_usings, package_name, original_code,
     if use_default_usings
         Core.eval(mod, :(using Test))
 
-        if package_name!=""
+        if package_name != ""
             Core.eval(mod, :(using $(Symbol(package_name))))
         end
     end
@@ -81,7 +81,7 @@ function run_tests(path; filter=nothing)
     # Find package name
     package_name = ""
     package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
-    if package_filename!==nothing
+    if package_filename !== nothing
         try
             project_content = TOML.parsefile(package_filename)
 
@@ -124,7 +124,7 @@ function run_tests(path; filter=nothing)
 
     # Filter @testitems
     if filter !== nothing
-        for file in keys(testitems)     
+        for file in keys(testitems)
             testitems[file] = Base.filter(i -> filter((filename=file, name=i.name, tags=i.option_tags)), testitems[file])
         end
     end
@@ -146,9 +146,9 @@ end
 
 macro run_package_tests(ex...)
     kwargs = []
-    
+
     for i in ex
-        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1]==:filter
+        if i isa Expr && i.head == :(=) && length(i.args) == 2 && i.args[1] == :filter
             push!(kwargs, esc(i))
         else
             error("Invalid argument")
