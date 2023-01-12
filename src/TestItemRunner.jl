@@ -130,11 +130,11 @@ function run_tests(path; filter=nothing, verbose=false)
     end
 
     # Run testitems
-    Test.push_testset(Test.DefaultTestSet("Package"; verbose=verbose))
+    Test.push_testset(testset("Package"; verbose=verbose))
     for (file, testitems) in pairs(testitems)
-        Test.push_testset(Test.DefaultTestSet(relpath(file, path); verbose=verbose))
+        Test.push_testset(testset(relpath(file, path); verbose=verbose))
         for testitem in testitems
-            Test.push_testset(Test.DefaultTestSet(testitem.name; verbose=verbose))
+            Test.push_testset(testset(testitem.name; verbose=verbose))
             run_testitem(testitem.filename, testitem.option_default_imports, package_name, testitem.code, testitem.line, testitem.column)
             Test.finish(Test.pop_testset())
         end
@@ -156,6 +156,14 @@ macro run_package_tests(ex...)
     end
 
     :(run_tests(joinpath($(dirname(string(__source__.file))), ".."); $(kwargs...)))
+end
+
+@static if VERSION < v"1.6"
+    # verbose keyword not support before v1.6
+    # https://github.com/JuliaLang/julia/commit/68c71f577275a16fffb743b2058afdc2d635068f
+    testset(a...; verbose=false, kw...) = Test.DefaultTestSet(a...; kw...)
+else
+    testset(a...; kw...) = Test.DefaultTestSet(a...; kw...)
 end
 
 end
