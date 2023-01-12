@@ -160,7 +160,7 @@ macro run_package_tests(ex...)
 end
 
 @static if VERSION < v"1.6"
-    # verbose keyword not support before v1.6
+    # verbose keyword not supported before v1.6
     # https://github.com/JuliaLang/julia/commit/68c71f577275a16fffb743b2058afdc2d635068f
     testset(a...; verbose=false, kw...) = Test.DefaultTestSet(a...; kw...)
 else
