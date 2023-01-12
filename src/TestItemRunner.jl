@@ -124,8 +124,9 @@ function run_tests(path; filter=nothing, verbose=false)
 
     # Filter @testitems
     if filter !== nothing
-        for file in keys(testitems)     
+        for file in keys(testitems)
             testitems[file] = Base.filter(i -> filter((filename=file, name=i.name, tags=i.option_tags)), testitems[file])
+            isempty(testitems[file]) && pop!(testitems, file)
         end
     end
 
