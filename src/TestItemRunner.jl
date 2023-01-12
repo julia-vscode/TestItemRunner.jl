@@ -59,7 +59,7 @@ end
     @test TestItemRunner.compute_line_column(content, 11) == (line=3, column=3)
 end
 
-function run_testitem(filepath, use_default_usings, package_name, original_code, line, column)
+function run_testitem(filepath, use_default_usings, setup, package_name, original_code, line, column)
     mod = Core.eval(Main, :(module $(gensym()) end))
 
     if use_default_usings
@@ -68,6 +68,10 @@ function run_testitem(filepath, use_default_usings, package_name, original_code,
         if package_name!=""
             Core.eval(mod, :(using $(Symbol(package_name))))
         end
+    end
+
+    for m in setup
+        Core.eval(mod, Expr(:using, Expr(:., :., :., m)))
     end
 
     code = string('\n'^line, ' '^column, original_code)
@@ -118,7 +122,7 @@ function run_tests(path; filter=nothing, verbose=false)
         end
 
         if length(testitems_for_file) > 0
-            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
+            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, option_setup=i.option_setup, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
         end
     end
 
@@ -136,7 +140,7 @@ function run_tests(path; filter=nothing, verbose=false)
         Test.push_testset(testset(relpath(file, path); verbose=verbose))
         for testitem in testitems
             Test.push_testset(testset(testitem.name; verbose=verbose))
-            run_testitem(testitem.filename, testitem.option_default_imports, package_name, testitem.code, testitem.line, testitem.column)
+            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column)
             Test.finish(Test.pop_testset())
         end
         Test.finish(Test.pop_testset())
