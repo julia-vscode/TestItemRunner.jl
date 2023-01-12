@@ -77,7 +77,7 @@ function run_testitem(filepath, use_default_usings, package_name, original_code,
     end
 end
 
-function run_tests(path; filter=nothing)
+function run_tests(path; filter=nothing, verbose=false)
     # Find package name
     package_name = ""
     package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
@@ -124,17 +124,18 @@ function run_tests(path; filter=nothing)
 
     # Filter @testitems
     if filter !== nothing
-        for file in keys(testitems)     
+        for file in keys(testitems)
             testitems[file] = Base.filter(i -> filter((filename=file, name=i.name, tags=i.option_tags)), testitems[file])
+            isempty(testitems[file]) && pop!(testitems, file)
         end
     end
 
     # Run testitems
-    Test.push_testset(Test.DefaultTestSet("Package"))
+    Test.push_testset(testset("Package"; verbose=verbose))
     for (file, testitems) in pairs(testitems)
-        Test.push_testset(Test.DefaultTestSet(relpath(file, path)))
+        Test.push_testset(testset(relpath(file, path); verbose=verbose))
         for testitem in testitems
-            Test.push_testset(Test.DefaultTestSet(testitem.name))
+            Test.push_testset(testset(testitem.name; verbose=verbose))
             run_testitem(testitem.filename, testitem.option_default_imports, package_name, testitem.code, testitem.line, testitem.column)
             Test.finish(Test.pop_testset())
         end
@@ -146,9 +147,9 @@ end
 
 macro run_package_tests(ex...)
     kwargs = []
-    
+
     for i in ex
-        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1]==:filter
+        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose)
             push!(kwargs, esc(i))
         else
             error("Invalid argument")
@@ -156,6 +157,14 @@ macro run_package_tests(ex...)
     end
 
     :(run_tests(joinpath($(dirname(string(__source__.file))), ".."); $(kwargs...)))
+end
+
+@static if VERSION < v"1.6"
+    # verbose keyword not supported before v1.6
+    # https://github.com/JuliaLang/julia/commit/68c71f577275a16fffb743b2058afdc2d635068f
+    testset(a...; verbose=false, kw...) = Test.DefaultTestSet(a...; kw...)
+else
+    testset(a...; kw...) = Test.DefaultTestSet(a...; kw...)
 end
 
 end

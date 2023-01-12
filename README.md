@@ -103,7 +103,7 @@ At the moment there are two ways to run `@testitem`s: with the integrated test U
 
 #### Integrating with the base test system
 
-If you want your tests to run when a user calls the regular base test functionality, or have you your tests run during CI runs, you can simplye add this package TestItemRunner.jl as a test dependency to your package, and then add this content as your `test/runtests.jl` file:
+If you want your tests to run when a user calls the regular base test functionality, or have you your tests run during CI runs, you can simply add this package TestItemRunner.jl as a test dependency to your package, and then add this content as your `test/runtests.jl` file:
 
 ```julia
 using TestItemRunner
@@ -123,3 +123,11 @@ The value that is passed to your custom filter function has three fields that yo
 - `name`: The full name of the `@testitem`, as a `String`.
 - `filename`: The full absolute filename of the file in which the `@testitem` is defined.
 - `tags`: A `Vector{Symbol}` with all the tags that you defined for this particular `@testitem`.
+
+If you want to print a summary of test results which shows all the `@testitems`, then you can pass `verbose=true`:
+
+```julia
+using TestItemRunner
+
+@run_package_tests verbose=true
+```

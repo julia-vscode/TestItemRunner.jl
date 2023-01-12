@@ -1,3 +1,3 @@
 using TestItemRunner
 
-@run_package_tests filter=i->endswith(i.filename, "TestItemRunner.jl")
+@run_package_tests filter=i->endswith(i.filename, "TestItemRunner.jl") verbose=true
