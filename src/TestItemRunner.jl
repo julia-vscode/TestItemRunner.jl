@@ -67,17 +67,21 @@ end
 const TEST_SETUP_MODULE_SET = TestSetupModuleSet(Set{Symbol}(), ReentrantLock())
 
 # setup is (filename, code, name, line, column)
-function ensure_evaled(setup)
+function ensure_evaled(filename, code, name, line, column)
     Base.@lock TEST_SETUP_MODULE_SET.lock begin
-        if !(setup.name in TEST_SETUP_MODULE_SET.modules)
-            Core.eval(Main, Expr(:toplevel, Expr(:module, true, esc(setup.name), esc(setup.code))))
+        if !(name in TEST_SETUP_MODULE_SET.modules)
+            mod = Core.eval(Main, :(module $(Symbol(name)) end))
+            code = string('\n'^line, ' '^column, code)
+            withpath(filename) do
+                Base.invokelatest(include_string, mod, code, filename)
+            end
         end
-        push!(TEST_SETUP_MODULE_SET.modules, setup.name)
+        push!(TEST_SETUP_MODULE_SET.modules, name)
     end
     return
 end
 
-function run_testitem(filepath, use_default_usings, setup, package_name, original_code, line, column)
+function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column)
     mod = Core.eval(Main, :(module $(gensym()) end))
 
     if use_default_usings
@@ -88,7 +92,7 @@ function run_testitem(filepath, use_default_usings, setup, package_name, origina
         end
     end
 
-    for m in setup
+    for m in setups
         Core.eval(mod, Expr(:using, Expr(:., :., :., m)))
     end
 
@@ -126,7 +130,7 @@ function run_tests(path; filter=nothing, verbose=false)
     # Find all @testitems and @testsetup
     testitems = Dict{String,Vector}()
     # testsetups maps @testsetup NAME => (filename, code, name, line, column)
-    testsetups = Dict{Symbol,Any}()
+    testsetups = Dict{String,Any}()
     for file in julia_files
         content = read(file, String)
         cst = CSTParser.parse(content, true)
@@ -147,7 +151,7 @@ function run_tests(path; filter=nothing, verbose=false)
             testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, option_setup=i.option_setup, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
         end
         for i in testsetups_for_file
-            testsetups[i.name] = (filename=file, code=content[i.code_range], name=i.name, compute_line_column(content, i.code_range.start)...)
+            testsetups[i.name] = (filename=file, code=content[i.code_range], name=Symbol(i.name), compute_line_column(content, i.code_range.start)...)
         end
     end
 
@@ -164,20 +168,19 @@ function run_tests(path; filter=nothing, verbose=false)
     for (file, testitems) in pairs(testitems)
         Test.push_testset(testset(relpath(file, path); verbose=verbose))
         for testitem in testitems
-            setups = nothing
             if !isempty(testitem.option_setup)
-                setups = []
                 for setup in testitem.option_setup
-                    if haskey(testsetups, setup)
-                        push!(setups, testsetups[setup])
-                        ensure_evaled(setup)
+                    key = String(setup)
+                    if haskey(testsetups, key)
+                        testsetup = testsetups[key]
+                        ensure_evaled(testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
                     else
                         error("Test setup $(setup) is not defined.")
                     end
                 end
             end
             Test.push_testset(testset(testitem.name; verbose=verbose))
-            run_testitem(testitem.filename, testitem.option_default_imports, setups, package_name, testitem.code, testitem.line, testitem.column)
+            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column)
             Test.finish(Test.pop_testset())
         end
         Test.finish(Test.pop_testset())
