@@ -5,8 +5,9 @@
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -21,8 +22,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -37,8 +39,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -53,8 +56,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -69,8 +73,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -85,8 +90,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -101,8 +107,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -117,8 +124,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -133,8 +141,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -149,8 +158,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -165,8 +175,9 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 0
     @test length(errors) == 1
@@ -181,11 +192,12 @@ end
     """)
 
     test_items = []
+    test_setups = []
     errors = []
-    TestItemDetection.find_test_items_detail!(code, test_items, errors)
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
 
     @test length(test_items) == 1
     @test length(errors) == 0
 
-    @test test_items[1] == (name="foo", range=1:70, code_range=57:67, option_default_imports=true, option_tags=[:a, :b])
+    @test test_items[1] == (name="foo", range=1:70, code_range=57:67, option_default_imports=true, option_tags=[:a, :b], option_setup=Symbol[])
 end
