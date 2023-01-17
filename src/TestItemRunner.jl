@@ -67,7 +67,8 @@ end
 
 # setup is (filename, code, name, line, column)
 function ensure_evaled(test_setup_module_set, filename, code, name, line, column)
-    Base.@lock test_setup_module_set.lock begin
+    lock(test_setup_module_set.lock)
+    try
         if !(name in test_setup_module_set.modules)
             mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
             code = string('\n'^line, ' '^column, code)
@@ -76,6 +77,8 @@ function ensure_evaled(test_setup_module_set, filename, code, name, line, column
             end
         end
         push!(test_setup_module_set.modules, name)
+    finally
+        unlock(test_setup_module_set.lock)
     end
     return
 end
