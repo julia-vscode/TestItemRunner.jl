@@ -60,28 +60,27 @@ end
 end
 
 struct TestSetupModuleSet
+    setupmodule::Module
     modules::Set{Symbol}
     lock::ReentrantLock
 end
 
-const TEST_SETUP_MODULE_SET = TestSetupModuleSet(Set{Symbol}(), ReentrantLock())
-
 # setup is (filename, code, name, line, column)
-function ensure_evaled(filename, code, name, line, column)
-    Base.@lock TEST_SETUP_MODULE_SET.lock begin
-        if !(name in TEST_SETUP_MODULE_SET.modules)
-            mod = Core.eval(Main, :(module $(Symbol(name)) end))
+function ensure_evaled(test_setup_module_set, filename, code, name, line, column)
+    Base.@lock test_setup_module_set.lock begin
+        if !(name in test_setup_module_set.modules)
+            mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
             code = string('\n'^line, ' '^column, code)
             withpath(filename) do
                 Base.invokelatest(include_string, mod, code, filename)
             end
         end
-        push!(TEST_SETUP_MODULE_SET.modules, name)
+        push!(test_setup_module_set.modules, name)
     end
     return
 end
 
-function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column)
+function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set)
     mod = Core.eval(Main, :(module $(gensym()) end))
 
     if use_default_usings
@@ -93,7 +92,7 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
     end
 
     for m in setups
-        Core.eval(mod, Expr(:using, Expr(:., :., :., m)))
+        Core.eval(mod, Expr(:using, Expr(:., :., :., nameof(test_setup_module_set.setupmodule), m)))
     end
 
     code = string('\n'^line, ' '^column, original_code)
@@ -139,8 +138,7 @@ function run_tests(path; filter=nothing, verbose=false)
         testsetups_for_file = []
         errors_for_file = []
         for i in cst.args
-            TestItemDetection.find_test_items_detail!(i, testitems_for_file, errors_for_file)
-            TestItemDetection.find_test_setups_detail!(i, testsetups_for_file, errors_for_file)
+            TestItemDetection.find_test_detail!(i, testitems_for_file, testsetups_for_file, errors_for_file)
         end
 
         if length(errors_for_file) > 0
@@ -164,6 +162,8 @@ function run_tests(path; filter=nothing, verbose=false)
     end
 
     # Run testitems
+    test_setup_module = Core.eval(Main, :(module $(gensym()) end))
+    test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}(), ReentrantLock())
     Test.push_testset(testset("Package"; verbose=verbose))
     for (file, testitems) in pairs(testitems)
         Test.push_testset(testset(relpath(file, path); verbose=verbose))
@@ -173,14 +173,14 @@ function run_tests(path; filter=nothing, verbose=false)
                     key = String(setup)
                     if haskey(testsetups, key)
                         testsetup = testsetups[key]
-                        ensure_evaled(testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
+                        ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
                     else
                         error("Test setup $(setup) is not defined.")
                     end
                 end
             end
             Test.push_testset(testset(testitem.name; verbose=verbose))
-            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column)
+            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set)
             Test.finish(Test.pop_testset())
         end
         Test.finish(Test.pop_testset())
