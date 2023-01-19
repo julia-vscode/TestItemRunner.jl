@@ -11,9 +11,13 @@ module CSTParser
     include("../packages/CSTParser/src/packagedef.jl")
 end
 
+include("../packages/JuliaWorkspaces/src/JuliaWorkspaces.jl")
+
 module TestItemDetection
     import ..CSTParser
     using ..CSTParser: EXPR
+    using ..JuliaWorkspaces: JuliaWorkspace
+    using ..JuliaWorkspaces.URIs2: URI
 
     include("../packages/TestItemDetection/src/packagedef.jl")
 end
@@ -62,24 +66,18 @@ end
 struct TestSetupModuleSet
     setupmodule::Module
     modules::Set{Symbol}
-    lock::ReentrantLock
 end
 
 # setup is (filename, code, name, line, column)
 function ensure_evaled(test_setup_module_set, filename, code, name, line, column)
-    lock(test_setup_module_set.lock)
-    try
-        if !(name in test_setup_module_set.modules)
-            mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
-            code = string('\n'^line, ' '^column, code)
-            withpath(filename) do
-                Base.invokelatest(include_string, mod, code, filename)
-            end
+    if !(name in test_setup_module_set.modules)
+        mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
+        code = string('\n'^line, ' '^column, code)
+        withpath(filename) do
+            Base.invokelatest(include_string, mod, code, filename)
         end
-        push!(test_setup_module_set.modules, name)
-    finally
-        unlock(test_setup_module_set.lock)
     end
+    push!(test_setup_module_set.modules, name)
     return
 end
 
@@ -145,6 +143,7 @@ function run_tests(path; filter=nothing, verbose=false)
         end
 
         if length(errors_for_file) > 0
+            @warn "Error in your test item or test setup definition" file errors=errors_for_file
             error("There is an error in your test item or test setup definition, we are aborting.")
         end
 
@@ -166,7 +165,7 @@ function run_tests(path; filter=nothing, verbose=false)
 
     # Run testitems
     test_setup_module = Core.eval(Main, :(module $(gensym()) end))
-    test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}(), ReentrantLock())
+    test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}())
     Test.push_testset(testset("Package"; verbose=verbose))
     for (file, testitems) in pairs(testitems)
         Test.push_testset(testset(relpath(file, path); verbose=verbose))
