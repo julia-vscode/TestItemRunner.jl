@@ -149,6 +149,7 @@ function run_tests(path; filter=nothing, verbose=false)
         end
 
         if length(errors_for_file) > 0
+            @warn "Error in your test item or test setup definition" file errors=errors_for_file
             error("There is an error in your test item or test setup definition, we are aborting.")
         end
 
