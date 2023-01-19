@@ -5,7 +5,7 @@ using TestItems, TestItemRunner
     @test true
 end
 
-@testsetup TestSetup begin
+@testsetup module TestSetup
     const x = 10
     getfloat() = rand()
 end
