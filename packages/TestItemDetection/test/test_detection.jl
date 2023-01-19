@@ -188,7 +188,7 @@ end
 @testitem "All parts correctly there" begin
     import CSTParser
 
-    code = CSTParser.parse("""@testitem "foo" tags=[:a, :b] default_imports=true begin println() end
+    code = CSTParser.parse("""@testitem "foo" tags=[:a, :b] setup=[FooSetup] default_imports=true begin println() end
     """)
 
     test_items = []
@@ -199,5 +199,65 @@ end
     @test length(test_items) == 1
     @test length(errors) == 0
 
-    @test test_items[1] == (name="foo", range=1:70, code_range=57:67, option_default_imports=true, option_tags=[:a, :b], option_setup=Symbol[])
+    @test test_items[1] == (name="foo", range=1:87, code_range=74:84, option_default_imports=true, option_tags=[:a, :b], option_setup=Symbol[:FooSetup])
+end
+
+@testitem "@testsetup macro missing module arg" begin
+    import CSTParser
+
+    src = """@testsetup
+    """
+    code = CSTParser.parse(src)
+
+    test_items = []
+    test_setups = []
+    errors = []
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
+
+    @test length(test_setups) == 0
+    @test length(errors) == 1
+
+    @test errors[1] == (error="Your `@testsetup` is missing a `module ... end` block.", range=1:length(src)-1)
+end
+
+@testitem "@testsetup macro extra args" begin
+    import CSTParser
+
+    src = """@testsetup "Foo" module end"""
+    code = CSTParser.parse(src)
+
+    test_items = []
+    test_setups = []
+    errors = []
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
+
+    @test length(test_setups) == 0
+    @test length(errors) == 1
+
+    @test errors[1] == (error="Your `@testsetup` must have a single `module ... end` argument.", range=1:length(src))
+end
+
+@testitem "@testsetup all correct" begin
+    import CSTParser
+
+    src = """@testsetup module Foo
+        const BAR = 1
+        qux() = 2
+    end
+    """
+    code = CSTParser.parse(src)
+
+    test_items = []
+    test_setups = []
+    errors = []
+    TestItemDetection.find_test_detail!(code, test_items, test_setups, errors)
+
+    @test length(test_setups) == 1
+    @test length(errors) == 0
+
+    @test test_setups[1] == (
+        name="Foo",
+        range=1:length(src)-1,
+        code_range=(length("@testsetup module Foo") + 1):(length(src) - 4)
+    )
 end
