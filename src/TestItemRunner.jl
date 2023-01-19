@@ -11,9 +11,13 @@ module CSTParser
     include("../packages/CSTParser/src/packagedef.jl")
 end
 
+include("../packages/JuliaWorkspaces/src/JuliaWorkspaces.jl")
+
 module TestItemDetection
     import ..CSTParser
     using ..CSTParser: EXPR
+    using ..JuliaWorkspaces: JuliaWorkspace
+    using ..JuliaWorkspaces.URIs2: URI
 
     include("../packages/TestItemDetection/src/packagedef.jl")
 end
