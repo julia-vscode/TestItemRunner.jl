@@ -103,6 +103,40 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
     end
 end
 
+mutable struct TestItemTree
+    name  :: String
+    path  :: String
+    nodes :: Dict{String, TestItemTree}
+end
+
+TestItemTree(name, path) = TestItemTree(name, normpath(path), Dict())
+
+function insert_node!(tree::TestItemTree, path::Vector{String})
+    isempty(path) && return
+    name = popfirst!(path)
+    subtree = get!(()->TestItemTree(name, joinpath(tree.path, name)), tree.nodes, name)
+    insert_node!(subtree, path)
+end
+
+insert_node!(tree::TestItemTree, path::String) = insert_node!(tree, splitpath(relpath(path, tree.path)))
+
+function Base.show(io::IO, mime::MIME"text/plain", tree::TestItemTree; indent="")
+    println(io, "$indent- $(tree.name) ($(tree.path))")
+    foreach(values(tree.nodes)) do subtree
+        show(io, mime, subtree; indent=indent*"  ")
+    end
+end
+
+function simplify!(tree::TestItemTree)
+    foreach(simplify!, values(tree.nodes))
+    if length(tree.nodes) == 1
+        node = first(values(tree.nodes))
+        tree.name  = tree.name == "" ? node.name : "$(tree.name)/$(node.name)"
+        tree.path  = node.path
+        tree.nodes = node.nodes
+    end
+end
+
 function run_tests(path; filter=nothing, verbose=false)
     # Find package name
     package_name = ""
@@ -163,32 +197,44 @@ function run_tests(path; filter=nothing, verbose=false)
         end
     end
 
+    # Populate the TestItemTree
+    tree = TestItemTree(!isempty(package_name) ? package_name : path, path)
+    for path in keys(testitems)
+        insert_node!(tree, path)
+    end
+    simplify!(tree)
+
     # Run testitems
     test_setup_module = Core.eval(Main, :(module $(gensym()) end))
     test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}())
-    Test.push_testset(testset("Package"; verbose=verbose))
-    for (file, testitems) in pairs(testitems)
-        Test.push_testset(testset(relpath(file, path); verbose=verbose))
-        for testitem in testitems
-            if !isempty(testitem.option_setup)
-                for setup in testitem.option_setup
-                    key = String(setup)
-                    if haskey(testsetups, key)
-                        testsetup = testsetups[key]
-                        ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
-                    else
-                        error("Test setup $(setup) is not defined.")
+
+    function run_tree(tree)
+        Test.push_testset(testset(tree.name; verbose=verbose))
+        if isempty(tree.nodes)
+            for testitem in testitems[tree.path]
+                if !isempty(testitem.option_setup)
+                    for setup in testitem.option_setup
+                        key = String(setup)
+                        if haskey(testsetups, key)
+                            testsetup = testsetups[key]
+                            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
+                        else
+                            error("Test setup $(setup) is not defined.")
+                        end
                     end
                 end
+                Test.push_testset(testset(testitem.name; verbose=verbose))
+                run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set)
+                Test.finish(Test.pop_testset())
             end
-            Test.push_testset(testset(testitem.name; verbose=verbose))
-            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set)
-            Test.finish(Test.pop_testset())
+        else
+            foreach(sort!(collect(keys(tree.nodes)))) do key
+                run_tree(tree.nodes[key])
+            end
         end
         Test.finish(Test.pop_testset())
     end
-    ts = Test.pop_testset()
-    Test.finish(ts)
+    run_tree(tree)
 end
 
 macro run_package_tests(ex...)
