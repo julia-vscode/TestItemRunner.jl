@@ -1,3 +1,17 @@
+"""
+    TestItemRunner
+
+This module provides functionalities to run `@testitem` tests in a Julia package, 
+as part of the TestItemRunner.jl package. It supports running individual test items, 
+which are self-contained units of code written within `@testitem` macros.
+
+# Key Features
+- Provides a mechanism to run individual test items in isolation, ensuring that each 
+  test item is executed in a new Julia module.
+- Supports filtering of test items based on custom criteria, and verbose output during testing.
+- Integrates with the base test system, and can be utilized in conjunction with the Julia VS Code 
+  extension or as a standalone test runner.
+"""
 module TestItemRunner
 
 include("../packages/Tokenize/src/Tokenize.jl")
@@ -68,7 +82,6 @@ struct TestSetupModuleSet
     modules::Set{Symbol}
 end
 
-# setup is (filename, code, name, line, column)
 function ensure_evaled(test_setup_module_set, filename, code, name, line, column)
     if !(name in test_setup_module_set.modules)
         mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
@@ -103,6 +116,16 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
     end
 end
 
+"""
+    run_tests(path; filter=nothing, verbose=false)
+
+Run all test items in a directory and its subdirectories.
+
+# Arguments
+- `path`: The path to the directory containing the tests.
+- `filter`: A filter function to apply to the test items.
+- `verbose`: Whether to run the tests in verbose mode.
+"""
 function run_tests(path; filter=nothing, verbose=false)
     # Find package name
     package_name = ""
@@ -191,6 +214,24 @@ function run_tests(path; filter=nothing, verbose=false)
     Test.finish(ts)
 end
 
+"""
+    @run_package_tests(ex...)
+
+Run all test items in a package, using optional filter and verbosity arguments.
+
+# Usage
+```julia
+@run_package_tests filter=<filter_function>, verbose=<bool>
+```
+
+```julia
+@run_package_tests filter=ti->!(:skipci in ti.tags)
+```
+
+# Arguments
+- `filter`: An optional filter function to apply to the test items.
+- `verbose`: An optional argument to specify verbosity.
+"""
 macro run_package_tests(ex...)
     kwargs = []
 
