@@ -1,6 +1,6 @@
 # TestItemRunner.jl
 
-[![Project Status: WIP – Initial development is in progress, but there has not yet been a stable, usable release suitable for the public.](https://www.repostatus.org/badges/latest/wip.svg)](https://www.repostatus.org/#wip)
+[![Project Status: Active – The project has reached a stable, usable state and is being actively developed.](https://www.repostatus.org/badges/latest/active.svg)](https://www.repostatus.org/#active)
 ![](https://github.com/julia-vscode/TestItemRunner.jl/workflows/Run%20tests/badge.svg)
 [![codecov](https://codecov.io/gh/julia-vscode/TestItemRunner.jl/branch/main/graph/badge.svg)](https://codecov.io/gh/julia-vscode/TestItemRunner.jl)
 
