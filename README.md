@@ -97,6 +97,46 @@ end
 
 Note how we now need to add the line `using MyPackage, Test` manually to our `@testitem` so that we have access to the `foo` function and `@test` macro.
 
+##### Shared modules
+
+You can reuse code by creating modules with `@testsetup`:
+
+```julia
+@testsetup module TestSetup
+    const x = 10
+    getfloat() = rand()
+end
+```
+
+You can then use the modules by listing them with the `setup` keyword.
+
+```julia
+@testitem "TestSetup" setup=[TestSetup] begin
+    @test TestSetup.x == 10
+    @test TestSetup.getfloat() isa Float64
+end
+```
+
+More complex use cases are possible, e.g., using a module inside another one :
+
+```julia
+@testsetup module CrossTestSetup
+    using Test
+    using ..TestSetup: x, getfloat
+    function cross_test()
+        @test x == 10
+        @test getfloat() isa Float64
+    end
+end
+
+@testitem "CrossTestSetup" setup=[TestSetup, CrossTestSetup] begin
+    using .CrossTestSetup: cross_test
+    cross_test()
+end
+```
+
+Note that the order of the modules in `setup` is important: `TestSetup` has to come first as it is used by `CrossTestSetup`.
+
 ### Running tests
 
 At the moment there are two ways to run `@testitem`s: with the integrated test UI in the Julia VS Code extension, or with this package TestItemRunner.jl. In both cases test item detection is based on syntactic analysis, i.e. no code from your package is run to detect test items. Both execution engines will instead look at all *.jl files in your package folder, identify all `@testitem` calls and then provide ways to run them.
