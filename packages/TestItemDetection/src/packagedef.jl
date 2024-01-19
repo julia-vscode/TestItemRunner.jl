@@ -20,8 +20,8 @@ function find_test_detail!(node, testitems, testsetups, errors)
         elseif length(child_nodes)==2
             push!(errors, (error="Your @testitem is missing a code block argument.", range=range))
             return
-        elseif !(child_nodes[end] isa EXPR && child_nodes[end].head==:block)
-            push!(errors, (error="The final argument of a @testitem must be a begin end block.", range=range))
+        elseif !(child_nodes[end] isa EXPR && child_nodes[end].head in (:block, :let))
+            push!(errors, (error="The final argument of a @testitem must be a begin end block or let end block.", range=range))
             return
         else
             option_tags = nothing
