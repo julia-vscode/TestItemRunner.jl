@@ -360,11 +360,13 @@ end
 
 # parse where
 function parse_operator_where(ps::ParseState, ret::EXPR, op::EXPR, setscope=true)
-    nextarg = @precedence ps LazyAndOp @closer ps :inwhere parse_expression(ps)
+    # https://github.com/JuliaLang/JuliaSyntax.jl/issues/395
+    prec = VERSION > v"1.10-" && kindof(ps.nt) == Tokens.LBRACE ? WhereOp : LazyAndOp
+    nextarg = @precedence ps prec @closer ps :inwhere parse_expression(ps)
     if headof(nextarg) === :braces
         pushfirst!(nextarg.args, ret)
         pushfirst!(nextarg.trivia, op)
-        ret = EXPR(:where, nextarg.args,nextarg.trivia)
+        ret = EXPR(:where, nextarg.args, nextarg.trivia)
     else
         ret = EXPR(:where, EXPR[ret, nextarg], EXPR[op])
     end
@@ -384,13 +386,13 @@ function parse_operator_dot(ps::ParseState, ret::EXPR, op::EXPR)
     if kindof(ps.nt) === Tokens.LPAREN
         @static if VERSION > v"1.1-"
             iserred = kindof(ps.ws) != Tokens.EMPTY_WS
-            sig = @default ps parse_call(ps, ret)
+            sig = @default ps @closer ps :for_generator parse_call(ps, ret)
             nextarg = EXPR(:tuple, sig.args[2:end], sig.trivia)
             if iserred
                 nextarg = mErrorToken(ps, nextarg, UnexpectedWhiteSpace)
             end
         else
-            sig = @default ps parse_call(ps, ret)
+            sig = @default ps @closer ps :for_generator parse_call(ps, ret)
             nextarg = EXPR(:tuple, sig.args[2:end], sig.trivia)
         end
     elseif iskeyword(ps.nt) || both_symbol_and_op(ps.nt)
@@ -479,7 +481,8 @@ function parse_operator(ps::ParseState, ret::EXPR, op::EXPR)
                 ) ||
                 headof(ret) === :do ||
                 is_dot(headof(ret)) ||
-                is_prime(headof(ret))
+                is_prime(headof(ret)) ||
+                isinterpolant(ret)
             if valof(op) == "'"
                 ret = EXPR(op, EXPR[ret], nothing)
             else
