@@ -11,7 +11,7 @@ Get a `Vector{UInt8}`, a vector of bytes of a string.
 function _bytes end
 _bytes(s::SubArray{UInt8}) = unsafe_wrap(Array, pointer(s), length(s))
 
-_bytes(s::Union{Vector{UInt8}, Base.CodeUnits}) = _bytes(String(s))
+_bytes(s::Union{Vector{UInt8},Base.CodeUnits}) = _bytes(String(s))
 _bytes(s::AbstractString) = codeunits(s)
 
 _bytes(s::Vector{UInt8}) = s
@@ -43,7 +43,7 @@ encoded within the query part of a URI.
 """
 escapeuri(key, value) = string(escapeuri(key), "=", escapeuri(value))
 escapeuri(key, values::Vector) = escapeuri(key => v for v in values)
-escapeuri(query) = isempty(query) ? absent : join((escapeuri(k, v) for (k,v) in query), "&")
+escapeuri(query) = isempty(query) ? absent : join((escapeuri(k, v) for (k, v) in query), "&")
 escapeuri(nt::NamedTuple) = escapeuri(pairs(nt))
 
 """
