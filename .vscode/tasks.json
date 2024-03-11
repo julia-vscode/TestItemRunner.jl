@@ -7,7 +7,7 @@
             "label": "Pull latest version of CSTParser",
             "type": "process",
             "command": "git",
-            "args": ["subtree", "pull", "--prefix", "packages/CSTParser", "https://github.com/julia-vscode/CSTParser.jl", "enable-vendoring", "--squash"],
+            "args": ["subtree", "pull", "--prefix", "packages/CSTParser", "https://github.com/julia-vscode/CSTParser.jl", "master", "--squash"],
             "problemMatcher": []
         },
         {
