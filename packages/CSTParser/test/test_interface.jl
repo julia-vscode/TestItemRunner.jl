@@ -1,5 +1,5 @@
 
-@testset "function defs" begin
+@testitem "function defs" begin
     @test CSTParser.defines_function(CSTParser.parse("function f end"))
     @test CSTParser.defines_function(CSTParser.parse("function f() end"))
     @test CSTParser.defines_function(CSTParser.parse("function f()::T end"))
@@ -17,7 +17,7 @@
     @test !CSTParser.defines_function(CSTParser.parse("a.b = x"))
 end
 
-@testset "datatype defs" begin
+@testitem "datatype defs" begin
     @test CSTParser.defines_struct(CSTParser.parse("struct T end"))
     @test CSTParser.defines_struct(CSTParser.parse("mutable struct T end"))
     @test CSTParser.defines_mutable(CSTParser.parse("mutable struct T end"))
@@ -26,7 +26,9 @@ end
     @test CSTParser.defines_primitive(CSTParser.parse("primitive type a b end"))
 end
 
-@testset "get_name" begin
+@testitem "get_name" begin
+    using CSTParser: valof
+    
     @test valof(CSTParser.get_name(CSTParser.parse("struct T end"))) == "T"
     @test valof(CSTParser.get_name(CSTParser.parse("struct T{T} end"))) == "T"
     @test valof(CSTParser.get_name(CSTParser.parse("struct T <: T end"))) == "T"
@@ -52,10 +54,12 @@ end
     @test valof(CSTParser.get_name(CSTParser.parse("function f()::T end"))) == "f"
     @test valof(CSTParser.get_name(CSTParser.parse("function f(x::T) where T end"))) == "f"
     @test valof(CSTParser.get_name(CSTParser.parse("function f{T}() end"))) == "f"
+    @test valof(CSTParser.get_name(CSTParser.parse("function (f()) end"))) == "f"
 
     # Operators
     @test CSTParser.str_value(CSTParser.get_name(CSTParser.parse("function +() end"))) == "+"
     @test CSTParser.str_value(CSTParser.get_name(CSTParser.parse("function (+)() end"))) == "+"
+    @test CSTParser.str_value(CSTParser.get_name(CSTParser.parse("function (a + b) end"))) == "+"
     @test CSTParser.str_value(CSTParser.get_name(CSTParser.parse("+(x,y) = x"))) == "+"
     @test CSTParser.str_value(CSTParser.get_name(CSTParser.parse("+(x,y)::T = x"))) == "+"
     @test CSTParser.str_value(CSTParser.get_name(CSTParser.parse("!(x)::T = x"))) == "!"
@@ -63,7 +67,7 @@ end
 end
 
 
-# @testset "get_sig_params" begin
+# @testitem "get_sig_params" begin
 #     f = x -> CSTParser.str_value.(CSTParser.get_args(CSTParser.parse(x)))
 #     @test f("function f(a) end") == ["a"]
 #     @test f("function f(a::T) end") == ["a"]
@@ -86,7 +90,7 @@ end
 #     end") == ["a", "b"]
 # end
 
-@testset "has_error" begin
+@testitem "has_error" begin
     # Just an error token
     @test CSTParser.has_error(CSTParser.parse(","))
     # A nested ErrorToken

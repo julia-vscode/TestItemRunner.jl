@@ -506,41 +506,85 @@ function _unescape_string(io, s::AbstractString)
         end
     end
 end
-
-function valid_escaped_seq(s::AbstractString)
-    l = length(s)
-    l == 0 && return false # zero length chars are always invalid
-    l == 1 && return true # length-one chars are always valid to Julia's parser
-    a = Iterators.Stateful(s)
-    if popfirst!(a) == '\\'
-        c = popfirst!(a)
-        if c === 'x' || c === 'u' || c === 'U'
-            maxiter = c === 'x' ? 2 : c === 'u' ? 4 : 8
-            0 < length(a) <= maxiter || return false
-            n = 0
-            while !isempty(a)
-                nc = popfirst!(a)
-                n = '0' <= nc <= '9' ? n << 4 + (nc - '0') :
-                    'a' <= nc <= 'f' ? n << 4 + (nc - 'a' + 10) :
-                    'A' <= nc <= 'F' ? n << 4 + (nc - 'A' + 10) : return false
+@static if VERSION < v"1.9-"
+    function valid_escaped_seq(s::AbstractString)
+        l = length(s)
+        l == 0 && return false # zero length chars are always invalid
+        l == 1 && return true # length-one chars are always valid to Julia's parser
+        a = Iterators.Stateful(s)
+        if popfirst!(a) == '\\'
+            c = popfirst!(a)
+            if c === 'x' || c === 'u' || c === 'U'
+                maxiter = c === 'x' ? 2 : c === 'u' ? 4 : 8
+                0 < length(a) <= maxiter || return false
+                n = 0
+                while !isempty(a)
+                    nc = popfirst!(a)
+                    n = '0' <= nc <= '9' ? n << 4 + (nc - '0') :
+                        'a' <= nc <= 'f' ? n << 4 + (nc - 'a' + 10) :
+                        'A' <= nc <= 'F' ? n << 4 + (nc - 'A' + 10) : return false
+                end
+                return n <= 0x10ffff
+            elseif '0' <= c <= '7'
+                length(a) <= 3 || return false
+                n = c - '0'
+                while !isempty(a)
+                    nc = popfirst!(a)
+                    n = ('0' <= c <= '7') ? n << 3 + nc - '0' : return false
+                end
+                return n < 128
+            else
+                @static if VERSION < v"1.1.0"
+                    c = string(c)
+                end
+                return ncodeunits(c) == 1 && isempty(a)
             end
-            return n <= 0x10ffff
-        elseif '0' <= c <= '7'
-            length(a) <= 3 || return false
-            n = c - '0'
-            while !isempty(a)
-                nc = popfirst!(a)
-                n = ('0' <= c <= '7') ? n << 3 + nc - '0' : return false
-            end
-            return n < 128
-        else
-            @static if VERSION < v"1.1.0"
-                c = string(c)
-            end
-            return ncodeunits(c) == 1 && isempty(a)
         end
+        return false
     end
-    return false
+else
+    function valid_escaped_seq(s::AbstractString)
+        l = length(s)
+        l == 0 && return false # zero length chars are always invalid
+        l == 1 && return true # length-one chars are always valid to Julia's parser
+        a = Iterators.Stateful(s)
+        ok = false
+        while !isempty(a)
+            if popfirst!(a) == '\\'
+                c = popfirst!(a)
+                if c === 'x' || c === 'u' || c === 'U'
+                    maxiter = c === 'x' ? 2 : c === 'u' ? 4 : 8
+                    n = 0
+                    for _ in 1:maxiter
+                        isempty(a) && break
+                        nc = popfirst!(a)
+                        n = '0' <= nc <= '9' ? n << 4 + (nc - '0') :
+                            'a' <= nc <= 'f' ? n << 4 + (nc - 'a' + 10) :
+                            'A' <= nc <= 'F' ? n << 4 + (nc - 'A' + 10) : return false
+                    end
+                    ok = n <= 0x10ffff
+                elseif '0' <= c <= '7'
+                    n = c - '0'
+                    for _ in 1:3
+                        isempty(a) && break
+                        nc = popfirst!(a)
+                        n = ('0' <= c <= '7') ? n << 3 + nc - '0' : return false
+                    end
+                    ok = n < 128
+                else
+                    @static if VERSION < v"1.1.0"
+                        c = string(c)
+                    end
+                    ok = ncodeunits(c) == 1 && isempty(a)
+                end
+            else
+                return false
+            end
+
+            !ok && return false
+        end
+        return ok
+    end
 end
 
 """
@@ -575,7 +619,12 @@ _kw_convert(x::EXPR) = EXPR(:kw, EXPR[x.args[1], x.args[2]], EXPR[x.head], x.ful
 
 When parsing a function or macro signature, should it be converted to a tuple?
 """
-convertsigtotuple(sig::EXPR) = isbracketed(sig) && !(istuple(sig.args[1]) || (headof(sig.args[1]) === :block) || issplat(sig.args[1]))
+convertsigtotuple(sig::EXPR) = isbracketed(sig) && !(
+        istuple(sig.args[1]) ||
+        iscall(sig.args[1]) ||
+        headof(sig.args[1]) === :block ||
+        issplat(sig.args[1])
+    )
 
 """
     docable(head)
@@ -612,7 +661,23 @@ end
 
 function issuffixableliteral(ps::ParseState, x::EXPR)
     # prefixed string/cmd macros can be suffixed by identifiers or numeric literals
-    (isidentifier(ps.nt) || isnumberliteral(ps.nt) || isbool(ps.nt)) && isemptyws(ps.ws) && ismacrocall(x) && (valof(x.args[1]) isa String && (endswith(valof(x.args[1]), "_str") || endswith(valof(x.args[1]), "_cmd")))
+    return (
+            isidentifier(ps.nt) ||
+            isnumberliteral(ps.nt) ||
+            isbool(ps.nt)
+        ) &&
+        isemptyws(ps.ws) &&
+        ismacrocall(x) &&
+        (
+            (
+            valof(x.args[1]) isa String &&
+            (endswith(valof(x.args[1]), "_str") || endswith(valof(x.args[1]), "_cmd"))
+            ) ||
+            (
+                is_getfield(x.args[1]) && x.args[1].args[2] isa EXPR && x.args[1].args[2].head in (:quote, :quotenode) &&
+                (endswith(valof(x.args[1].args[2].args[1]), "_str") || endswith(valof(x.args[1].args[2].args[1]), "_cmd"))
+            )
+        )
 end
 
 function loop_check(ps, prevpos)
