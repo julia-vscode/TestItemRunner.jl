@@ -3,23 +3,23 @@ module TestItemRunner
 include("../packages/Tokenize/src/Tokenize.jl")
 
 module CSTParser
-    using ..Tokenize
-    import ..Tokenize.Tokens
-    import ..Tokenize.Tokens: RawToken, AbstractToken, iskeyword, isliteral, isoperator, untokenize
-    import ..Tokenize.Lexers: Lexer, peekchar, iswhitespace, readchar, emit, emit_error,  accept_batch, eof
+using ..Tokenize
+import ..Tokenize.Tokens
+import ..Tokenize.Tokens: RawToken, AbstractToken, iskeyword, isliteral, isoperator, untokenize
+import ..Tokenize.Lexers: Lexer, peekchar, iswhitespace, readchar, emit, emit_error, accept_batch, eof
 
-    include("../packages/CSTParser/src/packagedef.jl")
+include("../packages/CSTParser/src/packagedef.jl")
 end
 
 include("../packages/JuliaWorkspaces/src/JuliaWorkspaces.jl")
 
 module TestItemDetection
-    import ..CSTParser
-    using ..CSTParser: EXPR
-    using ..JuliaWorkspaces: JuliaWorkspace
-    using ..JuliaWorkspaces.URIs2: URI
+import ..CSTParser
+using ..CSTParser: EXPR
+using ..JuliaWorkspaces: JuliaWorkspace
+using ..JuliaWorkspaces.URIs2: URI
 
-    include("../packages/TestItemDetection/src/packagedef.jl")
+include("../packages/TestItemDetection/src/packagedef.jl")
 end
 
 import .CSTParser, Test, TestItems, TOML
@@ -87,7 +87,7 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
     if use_default_usings
         Core.eval(mod, :(using Test))
 
-        if package_name!=""
+        if package_name != ""
             Core.eval(mod, :(using $(Symbol(package_name))))
         end
     end
@@ -107,7 +107,7 @@ function run_tests(path; filter=nothing, verbose=false)
     # Find package name
     package_name = ""
     package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
-    if package_filename!==nothing
+    if package_filename !== nothing
         try
             project_content = TOML.parsefile(package_filename)
 
@@ -143,7 +143,7 @@ function run_tests(path; filter=nothing, verbose=false)
         end
 
         if length(errors_for_file) > 0
-            @warn "Error in your test item or test setup definition" file errors=errors_for_file
+            @warn "Error in your test item or test setup definition" file errors = errors_for_file
             error("There is an error in your test item or test setup definition, we are aborting.")
         end
 
@@ -195,7 +195,7 @@ macro run_package_tests(ex...)
     kwargs = []
 
     for i in ex
-        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose)
+        if i isa Expr && i.head == :(=) && length(i.args) == 2 && i.args[1] in (:filter, :verbose)
             push!(kwargs, esc(i))
         else
             error("Invalid argument")

@@ -258,6 +258,6 @@ end
     @test test_setups[1] == (
         name="Foo",
         range=1:length(src)-1,
-        code_range=(length("@testsetup module Foo") + 1):(length(src) - 4)
+        code_range=(length("@testsetup module Foo")+1):(length(src)-4)
     )
 end

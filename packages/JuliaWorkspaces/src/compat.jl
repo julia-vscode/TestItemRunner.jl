@@ -8,9 +8,9 @@
             _Z = UInt32('Z')
             _z = UInt32('z')
             a::UInt32 = base <= 36 ? 10 : 36
-            d = _0 <= _c <= _9 ? _c-_0             :
-                _A <= _c <= _Z ? _c-_A+ UInt32(10) :
-                _a <= _c <= _z ? _c-_a+a           : UInt32(base)
+            d = _0 <= _c <= _9 ? _c - _0 :
+                _A <= _c <= _Z ? _c - _A + UInt32(10) :
+                _a <= _c <= _z ? _c - _a + a : UInt32(base)
         end
 
         @inline function uuid_kernel(s, i, u)
