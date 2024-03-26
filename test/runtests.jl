@@ -15,4 +15,10 @@ end
     @test TestSetup.getfloat() isa Float64
 end
 
-@run_package_tests filter=i->endswith(i.filename, "TestItemRunner.jl") || endswith(i.filename, "runtests.jl") verbose=true
+function myfilter(i)
+    for fname in ("TestItemRunner.jl", "runtests.jl", "testitemtree.jl")
+        endswith(i.filename, fname) && return true
+    end
+    return false
+end
+@run_package_tests filter=myfilter verbose=true
