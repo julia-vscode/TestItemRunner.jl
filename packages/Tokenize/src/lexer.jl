@@ -12,19 +12,19 @@ import ..Tokens
 import ..Tokens: AbstractToken, Token, RawToken, Kind, TokenError, UNICODE_OPS, EMPTY_TOKEN, isliteral
 
 import ..Tokens: FUNCTION, ABSTRACT, IDENTIFIER, BAREMODULE, BEGIN, BREAK, CATCH, CONST, CONTINUE,
-                 DO, ELSE, ELSEIF, END, EXPORT, FALSE, FINALLY, FOR, FUNCTION, GLOBAL, LET, LOCAL, IF,
-                 IMPORT, IMPORTALL, MACRO, MODULE, OUTER, QUOTE, RETURN, TRUE, TRY, TYPE, USING, WHILE, ISA, IN,
-                 MUTABLE, PRIMITIVE, STRUCT, WHERE
+    DO, ELSE, ELSEIF, END, EXPORT, FALSE, FINALLY, FOR, FUNCTION, GLOBAL, LET, LOCAL, IF,
+    IMPORT, IMPORTALL, MACRO, MODULE, OUTER, QUOTE, RETURN, TRUE, TRY, TYPE, USING, WHILE, ISA, IN,
+    MUTABLE, PRIMITIVE, STRUCT, WHERE
 
 
 export tokenize
 
 @inline ishex(c::Char) = isdigit(c) || ('a' <= c <= 'f') || ('A' <= c <= 'F')
 @inline isbinary(c::Char) = c == '0' || c == '1'
-@inline isoctal(c::Char) =  '0' ≤ c ≤ '7'
+@inline isoctal(c::Char) = '0' ≤ c ≤ '7'
 @inline iswhitespace(c::Char) = Base.isspace(c) || c === '\ufeff'
 
-mutable struct Lexer{IO_t <: IO, T <: AbstractToken}
+mutable struct Lexer{IO_t<:IO,T<:AbstractToken}
     io::IO_t
     io_startpos::Int
 
@@ -44,7 +44,7 @@ mutable struct Lexer{IO_t <: IO, T <: AbstractToken}
     dotop::Bool
 end
 
-function Lexer(io::IO_t, T::Type{TT} = Token) where {IO_t,TT <: AbstractToken}
+function Lexer(io::IO_t, T::Type{TT}=Token) where {IO_t,TT<:AbstractToken}
     c1 = ' '
     p1 = position(io)
     if eof(io)
@@ -61,11 +61,11 @@ function Lexer(io::IO_t, T::Type{TT} = Token) where {IO_t,TT <: AbstractToken}
         end
 
     end
-    Lexer{IO_t,T}(io, position(io), 1, 1, position(io), 1, 1, position(io), Tokens.ERROR, IOBuffer(), (c1,c2,c3), (p1,p2,p3), false, false)
+    Lexer{IO_t,T}(io, position(io), 1, 1, position(io), 1, 1, position(io), Tokens.ERROR, IOBuffer(), (c1, c2, c3), (p1, p2, p3), false, false)
 end
-Lexer(str::AbstractString, T::Type{TT} = Token) where TT <: AbstractToken = Lexer(IOBuffer(str), T)
+Lexer(str::AbstractString, T::Type{TT}=Token) where TT<:AbstractToken = Lexer(IOBuffer(str), T)
 
-@inline token_type(l::Lexer{IO_t, TT}) where {IO_t, TT} = TT
+@inline token_type(l::Lexer{IO_t,TT}) where {IO_t,TT} = TT
 
 """
     tokenize(x, T = Token)
@@ -179,7 +179,7 @@ Returns the next character and increments the current position.
 """
 function readchar end
 
-function readchar(l::Lexer{I}) where {I <: IO}
+function readchar(l::Lexer{I}) where {I<:IO}
     c = readchar(l.io)
     l.chars = (l.chars[2], l.chars[3], c)
     l.charspos = (l.charspos[2], l.charspos[3], position(l.io))
@@ -195,8 +195,8 @@ function readchar(l::Lexer{I}) where {I <: IO}
     return l.chars[1]
 end
 
-readon(l::Lexer{I,RawToken}) where {I <: IO} = l.chars[1]
-function readon(l::Lexer{I,Token}) where {I <: IO}
+readon(l::Lexer{I,RawToken}) where {I<:IO} = l.chars[1]
+function readon(l::Lexer{I,Token}) where {I<:IO}
     if l.charstore.size != 0
         take!(l.charstore)
     end
@@ -204,8 +204,8 @@ function readon(l::Lexer{I,Token}) where {I <: IO}
     l.doread = true
 end
 
-readoff(l::Lexer{I,RawToken}) where {I <: IO} = l.chars[1]
-function readoff(l::Lexer{I,Token})  where {I <: IO}
+readoff(l::Lexer{I,RawToken}) where {I<:IO} = l.chars[1]
+function readoff(l::Lexer{I,Token}) where {I<:IO}
     l.doread = false
     return l.chars[1]
 end
@@ -217,7 +217,7 @@ Consumes the next character `c` if either `f::Function(c)` returns true, `c == f
 for `c::Char` or `c in f` otherwise. Returns `true` if a character has been
 consumed and `false` otherwise.
 """
-@inline function accept(l::Lexer, f::Union{Function, Char, Vector{Char}, String})
+@inline function accept(l::Lexer, f::Union{Function,Char,Vector{Char},String})
     c = peekchar(l)
     if isa(f, Function)
         ok = f(c)
@@ -248,10 +248,10 @@ end
 
 Returns a `Token` of kind `kind` with contents `str` and starts a new `Token`.
 """
-function emit(l::Lexer{IO_t,Token}, kind::Kind, err::TokenError = Tokens.NO_ERR) where IO_t
+function emit(l::Lexer{IO_t,Token}, kind::Kind, err::TokenError=Tokens.NO_ERR) where IO_t
     suffix = false
     if kind in (Tokens.ERROR, Tokens.STRING, Tokens.TRIPLE_STRING, Tokens.CMD, Tokens.TRIPLE_CMD)
-        str = String(l.io.data[(l.token_startpos + 1):position(l)])
+        str = String(l.io.data[(l.token_startpos+1):position(l)])
     elseif (kind == Tokens.IDENTIFIER || isliteral(kind) || kind == Tokens.COMMENT || kind == Tokens.WHITESPACE)
         str = String(take!(l.charstore))
     elseif optakessuffix(kind)
@@ -264,16 +264,16 @@ function emit(l::Lexer{IO_t,Token}, kind::Kind, err::TokenError = Tokens.NO_ERR)
         str = ""
     end
     tok = Token(kind, (l.token_start_row, l.token_start_col),
-            (l.current_row, l.current_col - 1),
-            startpos(l), position(l) - 1,
-            str, err, l.dotop, suffix)
+        (l.current_row, l.current_col - 1),
+        startpos(l), position(l) - 1,
+        str, err, l.dotop, suffix)
     l.dotop = false
     l.last_token = kind
     readoff(l)
     return tok
 end
 
-function emit(l::Lexer{IO_t,RawToken}, kind::Kind, err::TokenError = Tokens.NO_ERR) where IO_t
+function emit(l::Lexer{IO_t,RawToken}, kind::Kind, err::TokenError=Tokens.NO_ERR) where IO_t
     suffix = false
     if optakessuffix(kind)
         while isopsuffix(peekchar(l))
@@ -283,8 +283,8 @@ function emit(l::Lexer{IO_t,RawToken}, kind::Kind, err::TokenError = Tokens.NO_E
     end
 
     tok = RawToken(kind, (l.token_start_row, l.token_start_col),
-                  (l.current_row, l.current_col - 1),
-                  startpos(l), position(l) - 1, err, l.dotop, suffix)
+        (l.current_row, l.current_col - 1),
+        startpos(l), position(l) - 1, err, l.dotop, suffix)
 
     l.dotop = false
     l.last_token = kind
@@ -297,7 +297,7 @@ end
 
 Returns an `ERROR` token with error `err` and starts a new `Token`.
 """
-function emit_error(l::Lexer, err::TokenError = Tokens.UNKNOWN)
+function emit_error(l::Lexer, err::TokenError=Tokens.UNKNOWN)
     return emit(l, Tokens.ERROR, err)
 end
 
@@ -311,7 +311,7 @@ end
 
 Returns the next `Token`.
 """
-function next_token(l::Lexer, start = true)
+function next_token(l::Lexer, start=true)
     start && start_token!(l)
     c = readchar(l)
     if eof(c)
@@ -335,17 +335,17 @@ function next_token(l::Lexer, start = true)
     elseif c == ','
         return emit(l, Tokens.COMMA)
     elseif c == '*'
-        return lex_star(l);
+        return lex_star(l)
     elseif c == '^'
-        return lex_circumflex(l);
+        return lex_circumflex(l)
     elseif c == '@'
         return emit(l, Tokens.AT_SIGN)
     elseif c == '?'
         return emit(l, Tokens.CONDITIONAL)
     elseif c == '$'
-        return lex_dollar(l);
+        return lex_dollar(l)
     elseif c == '⊻'
-        return lex_xor(l);
+        return lex_xor(l)
     elseif c == '~'
         return emit(l, Tokens.APPROX)
     elseif c == '#'
@@ -369,21 +369,21 @@ function next_token(l::Lexer, start = true)
     elseif c == '÷'
         return lex_division(l)
     elseif c == '"'
-        return lex_quote(l);
+        return lex_quote(l)
     elseif c == '%'
-        return lex_percent(l);
+        return lex_percent(l)
     elseif c == '/'
-        return lex_forwardslash(l);
+        return lex_forwardslash(l)
     elseif c == '\\'
-        return lex_backslash(l);
+        return lex_backslash(l)
     elseif c == '.'
-        return lex_dot(l);
+        return lex_dot(l)
     elseif c == '+'
-        return lex_plus(l);
+        return lex_plus(l)
     elseif c == '-'
-        return lex_minus(l);
+        return lex_minus(l)
     elseif c == '`'
-        return lex_cmd(l);
+        return lex_cmd(l)
     elseif is_identifier_start_char(c)
         return lex_identifier(l, c)
     elseif isdigit(c)
@@ -479,7 +479,8 @@ function lex_less(l::Lexer)
     elseif accept(l, '|') # <|
         return emit(l, Tokens.LPIPE)
     elseif dpeekchar(l) == ('-', '-') # <-- or <-->
-        readchar(l); readchar(l)
+        readchar(l)
+        readchar(l)
         if accept(l, '>')
             return emit(l, Tokens.DOUBLE_ARROW)
         else
@@ -627,7 +628,7 @@ end
 function lex_digit(l::Lexer, kind)
     readon(l)
     accept_number(l, isdigit)
-    pc,ppc = dpeekchar(l)
+    pc, ppc = dpeekchar(l)
     if pc == '.'
         if kind === Tokens.FLOAT
             # If we enter the function with kind == FLOAT then a '.' has been parsed.
@@ -639,22 +640,22 @@ function lex_digit(l::Lexer, kind)
             readchar(l)
             return emit_error(l)
         elseif (!(isdigit(ppc) ||
-            iswhitespace(ppc) ||
-            is_identifier_start_char(ppc)
-            || ppc == '('
-            || ppc == ')'
-            || ppc == '['
-            || ppc == ']'
-            || ppc == '{'
-            || ppc == '}'
-            || ppc == ','
-            || ppc == ';'
-            || ppc == '@'
-            || ppc == '`'
-            || ppc == '"'
-            || ppc == ':'
-            || ppc == '?'
-            || eof(ppc)))
+                  iswhitespace(ppc) ||
+                  is_identifier_start_char(ppc)
+                  || ppc == '('
+                  || ppc == ')'
+                  || ppc == '['
+                  || ppc == ']'
+                  || ppc == '{'
+                  || ppc == '}'
+                  || ppc == ','
+                  || ppc == ';'
+                  || ppc == '@'
+                  || ppc == '`'
+                  || ppc == '"'
+                  || ppc == ':'
+                  || ppc == '?'
+                  || eof(ppc)))
             kind = Tokens.INTEGER
 
             return emit(l, kind)
@@ -669,7 +670,7 @@ function lex_digit(l::Lexer, kind)
             readchar(l)
             accept(l, "+-")
             if accept_batch(l, isdigit)
-                pc,ppc = dpeekchar(l)
+                pc, ppc = dpeekchar(l)
                 if pc === '.' && !dotop2(ppc, ' ')
                     accept(l, '.')
                     return emit_error(l, Tokens.INVALID_NUMERIC_CONSTANT)
@@ -687,7 +688,7 @@ function lex_digit(l::Lexer, kind)
         readchar(l)
         accept(l, "+-")
         if accept_batch(l, isdigit)
-            pc,ppc = dpeekchar(l)
+            pc, ppc = dpeekchar(l)
             if pc === '.' && !dotop2(ppc, ' ')
                 accept(l, '.')
                 return emit_error(l, Tokens.INVALID_NUMERIC_CONSTANT)
@@ -729,14 +730,14 @@ function lex_digit(l::Lexer, kind)
     return emit(l, kind)
 end
 
-function lex_prime(l, doemit = true)
+function lex_prime(l, doemit=true)
     if l.last_token == Tokens.IDENTIFIER ||
-        l.last_token == Tokens.DOT ||
-        l.last_token ==  Tokens.RPAREN ||
-        l.last_token ==  Tokens.RSQUARE ||
-        l.last_token ==  Tokens.RBRACE ||
-        l.last_token == Tokens.PRIME ||
-        l.last_token == Tokens.END || isliteral(l.last_token)
+       l.last_token == Tokens.DOT ||
+       l.last_token == Tokens.RPAREN ||
+       l.last_token == Tokens.RSQUARE ||
+       l.last_token == Tokens.RBRACE ||
+       l.last_token == Tokens.PRIME ||
+       l.last_token == Tokens.END || isliteral(l.last_token)
         return emit(l, Tokens.PRIME)
     else
         readon(l)
@@ -904,39 +905,39 @@ function lex_dot(l::Lexer)
         if dotop1(pc)
             l.dotop = true
             return next_token(l, false)
-        elseif pc =='+'
+        elseif pc == '+'
             l.dotop = true
             readchar(l)
             return lex_plus(l)
-        elseif pc =='-'
+        elseif pc == '-'
             l.dotop = true
             readchar(l)
             return lex_minus(l)
-        elseif pc =='*'
+        elseif pc == '*'
             l.dotop = true
             readchar(l)
             return lex_star(l)
-        elseif pc =='/'
+        elseif pc == '/'
             l.dotop = true
             readchar(l)
             return lex_forwardslash(l)
-        elseif pc =='\\'
+        elseif pc == '\\'
             l.dotop = true
             readchar(l)
             return lex_backslash(l)
-        elseif pc =='^'
+        elseif pc == '^'
             l.dotop = true
             readchar(l)
             return lex_circumflex(l)
-        elseif pc =='<'
+        elseif pc == '<'
             l.dotop = true
             readchar(l)
             return lex_less(l)
-        elseif pc =='>'
+        elseif pc == '>'
             l.dotop = true
             readchar(l)
             return lex_greater(l)
-        elseif pc =='&'
+        elseif pc == '&'
             l.dotop = true
             readchar(l)
             if accept(l, "=")
@@ -949,7 +950,7 @@ function lex_dot(l::Lexer)
                 end
                 return emit(l, Tokens.AND)
             end
-        elseif pc =='%'
+        elseif pc == '%'
             l.dotop = true
             readchar(l)
             return lex_percent(l)
@@ -1064,44 +1065,44 @@ function simple_hash(str)
 end
 
 kws = [
-Tokens.ABSTRACT,
-Tokens.BAREMODULE,
-Tokens.BEGIN,
-Tokens.BREAK,
-Tokens.CATCH,
-Tokens.CONST,
-Tokens.CONTINUE,
-Tokens.DO,
-Tokens.ELSE,
-Tokens.ELSEIF,
-Tokens.END,
-Tokens.EXPORT,
-Tokens.FINALLY,
-Tokens.FOR,
-Tokens.FUNCTION,
-Tokens.GLOBAL,
-Tokens.IF,
-Tokens.IMPORT,
-Tokens.IMPORTALL,
-Tokens.LET,
-Tokens.LOCAL,
-Tokens.MACRO,
-Tokens.MODULE,
-Tokens.MUTABLE,
-Tokens.OUTER,
-Tokens.PRIMITIVE,
-Tokens.QUOTE,
-Tokens.RETURN,
-Tokens.STRUCT,
-Tokens.TRY,
-Tokens.TYPE,
-Tokens.USING,
-Tokens.WHILE,
-Tokens.IN,
-Tokens.ISA,
-Tokens.WHERE,
-Tokens.TRUE,
-Tokens.FALSE,
+    Tokens.ABSTRACT,
+    Tokens.BAREMODULE,
+    Tokens.BEGIN,
+    Tokens.BREAK,
+    Tokens.CATCH,
+    Tokens.CONST,
+    Tokens.CONTINUE,
+    Tokens.DO,
+    Tokens.ELSE,
+    Tokens.ELSEIF,
+    Tokens.END,
+    Tokens.EXPORT,
+    Tokens.FINALLY,
+    Tokens.FOR,
+    Tokens.FUNCTION,
+    Tokens.GLOBAL,
+    Tokens.IF,
+    Tokens.IMPORT,
+    Tokens.IMPORTALL,
+    Tokens.LET,
+    Tokens.LOCAL,
+    Tokens.MACRO,
+    Tokens.MODULE,
+    Tokens.MUTABLE,
+    Tokens.OUTER,
+    Tokens.PRIMITIVE,
+    Tokens.QUOTE,
+    Tokens.RETURN,
+    Tokens.STRUCT,
+    Tokens.TRY,
+    Tokens.TYPE,
+    Tokens.USING,
+    Tokens.WHILE,
+    Tokens.IN,
+    Tokens.ISA,
+    Tokens.WHERE,
+    Tokens.TRUE,
+    Tokens.FALSE,
 ]
 
 const kw_hash = Dict(simple_hash(lowercase(string(kw))) => kw for kw in kws)

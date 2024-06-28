@@ -56,12 +56,12 @@ function JuliaWorkspace(workspace_folders::Set{URI})
     text_documents = isempty(workspace_folders) ? Dict{URI,TextDocument}() : merge((read_path_into_textdocuments(path) for path in workspace_folders)...)
 
     toml_syntax_trees = Dict{URI,Dict}()
-    for (k,v) in pairs(text_documents)
+    for (k, v) in pairs(text_documents)
         if endswith(lowercase(string(k)), ".toml")
             # try
-                toml_syntax_trees[k] = parse_toml_file(get_text(v))
+            toml_syntax_trees[k] = parse_toml_file(get_text(v))
             # catch err
-                # TODO Add some diagnostics
+            # TODO Add some diagnostics
             # end
         end
     end
@@ -78,13 +78,13 @@ end
 function is_path_project_file(path)
     basename_lower_case = basename(lowercase(path))
 
-    return basename_lower_case=="project.toml" || basename_lower_case=="juliaproject.toml"
+    return basename_lower_case == "project.toml" || basename_lower_case == "juliaproject.toml"
 end
 
 function is_path_manifest_file(path)
     basename_lower_case = basename(lowercase(path))
 
-    return basename_lower_case=="manifest.toml" || basename_lower_case=="juliamanifest.toml"
+    return basename_lower_case == "manifest.toml" || basename_lower_case == "juliamanifest.toml"
 end
 
 function read_textdocument_from_uri(uri::URI)
@@ -109,21 +109,21 @@ function read_path_into_textdocuments(uri::URI)
 
     if true
         #T TODO Move this check into the LS logic
-    # if load_rootpath(path)    
-    # TODO Think about this try catch block
+        # if load_rootpath(path)    
+        # TODO Think about this try catch block
         # try
-            for (root, _, files) in walkdir(path, onerror=x -> x)
-                for file in files
-                    
-                    filepath = joinpath(root, file)
-                    if is_path_project_file(filepath) || is_path_manifest_file(filepath)
-                        uri = filepath2uri(filepath)
-                        doc = read_textdocument_from_uri(uri)
-                        doc === nothing && continue
-                        result[uri] = doc
-                    end
+        for (root, _, files) in walkdir(path, onerror=x -> x)
+            for file in files
+
+                filepath = joinpath(root, file)
+                if is_path_project_file(filepath) || is_path_manifest_file(filepath)
+                    uri = filepath2uri(filepath)
+                    doc = read_textdocument_from_uri(uri)
+                    doc === nothing && continue
+                    result[uri] = doc
                 end
             end
+        end
         # catch err
         #     is_walkdir_error(err) || rethrow()
         # end
@@ -137,7 +137,7 @@ function add_workspace_folder(jw::JuliaWorkspace, folder::URI)
     new_toml_syntax_trees = copy(jw._toml_syntax_trees)
 
     additional_documents = read_path_into_textdocuments(folder)
-    for (k,v) in pairs(additional_documents)
+    for (k, v) in pairs(additional_documents)
         if endswith(lowercase(string(k)), ".toml")
             try
                 new_toml_syntax_trees[k] = parse_toml_file(get_text(v))
@@ -158,7 +158,7 @@ function remove_workspace_folder(jw::JuliaWorkspace, folder::URI)
 
     new_text_documents = filter(jw._text_documents) do i
         # TODO Eventually use FilePathsBase functionality to properly test this
-        return any(startswith(string(i.first), string(j)) for j in new_roots )
+        return any(startswith(string(i.first), string(j)) for j in new_roots)
     end
 
     new_toml_syntax_trees = filter(jw._toml_syntax_trees) do i
@@ -174,7 +174,7 @@ function add_file(jw::JuliaWorkspace, uri::URI)
 
     new_jw = jw
 
-    if new_doc!==nothing
+    if new_doc !== nothing
         new_text_documents = copy(jw._text_documents)
         new_text_documents[uri] = new_doc
 
@@ -189,7 +189,7 @@ function add_file(jw::JuliaWorkspace, uri::URI)
             nothing
         end
 
-        new_jw =  JuliaWorkspace(jw._workspace_folders, new_text_documents, new_toml_syntax_trees, semantic_pass_toml_files(new_toml_syntax_trees)...)
+        new_jw = JuliaWorkspace(jw._workspace_folders, new_text_documents, new_toml_syntax_trees, semantic_pass_toml_files(new_toml_syntax_trees)...)
     end
 
     return new_jw
@@ -200,7 +200,7 @@ function update_file(jw::JuliaWorkspace, uri::URI)
 
     new_jw = jw
 
-    if new_doc!==nothing
+    if new_doc !== nothing
         new_text_documents = copy(jw._text_documents)
         new_text_documents[uri] = new_doc
 
@@ -240,11 +240,11 @@ function semantic_pass_toml_files(toml_syntax_trees)
     # Extract all packages & paths with a manifest
     packages = Dict{URI,JuliaPackage}()
     paths_with_manifest = Dict{String,Dict}()
-    for (k,v) in pairs(toml_syntax_trees)
+    for (k, v) in pairs(toml_syntax_trees)
         # TODO Maybe also check the filename here and only do the package detection for Project.toml and JuliaProject.toml
         if haskey(v, "name") && haskey(v, "uuid") && haskey(v, "version")
             parsed_uuid = tryparse(UUID, v["uuid"])
-            if parsed_uuid!==nothing
+            if parsed_uuid !== nothing
                 folder_uri = k |> uri2filepath |> dirname |> filepath2uri
                 packages[folder_uri] = JuliaPackage(k, v["name"], parsed_uuid)
             end
@@ -261,21 +261,21 @@ function semantic_pass_toml_files(toml_syntax_trees)
 
     # Extract all projects
     projects = Dict{URI,JuliaProject}()
-    for (k,_) in pairs(toml_syntax_trees)
+    for (k, _) in pairs(toml_syntax_trees)
         path = uri2filepath(k)
         dname = dirname(path)
         filename = basename(path)
         filename_lc = lowercase(filename)
 
-        if (filename_lc=="project.toml" || filename_lc=="juliaproject.toml" ) && haskey(paths_with_manifest, dname)
+        if (filename_lc == "project.toml" || filename_lc == "juliaproject.toml") && haskey(paths_with_manifest, dname)
             manifest_content = paths_with_manifest[dname]
             manifest_content isa Dict || continue
             deved_packages = Dict{URI,JuliaDevedPackage}()
             manifest_version = get(manifest_content, "manifest_format", "1.0")
 
-            manifest_deps = if manifest_version=="1.0"
+            manifest_deps = if manifest_version == "1.0"
                 manifest_content
-            elseif manifest_version=="2.0" && haskey(manifest_content, "deps") && manifest_content["deps"] isa Dict
+            elseif manifest_version == "2.0" && haskey(manifest_content, "deps") && manifest_content["deps"] isa Dict
                 manifest_content["deps"]
             else
                 continue
@@ -283,7 +283,7 @@ function semantic_pass_toml_files(toml_syntax_trees)
 
             for (k_entry, v_entry) in pairs(manifest_deps)
                 v_entry isa Vector || continue
-                length(v_entry)==1 || continue
+                length(v_entry) == 1 || continue
                 v_entry[1] isa Dict || continue
                 haskey(v_entry[1], "path") || continue
                 haskey(v_entry[1], "uuid") || continue
