@@ -4,5 +4,5 @@ import Tokenize
 
 include("lex_yourself.jl")
 @testset "lexer" begin
-include("lexer.jl")
+    include("lexer.jl")
 end

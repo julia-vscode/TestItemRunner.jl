@@ -12,7 +12,7 @@ isliteral(k::Kind) = begin_literal < k < end_literal
 isoperator(k::Kind) = begin_ops < k < end_ops
 
 # Create string => keyword kind
-const KEYWORDS = Dict{String, Kind}()
+const KEYWORDS = Dict{String,Kind}()
 
 function _add_kws()
     for k in instances(Kind)
@@ -36,7 +36,7 @@ _add_kws()
 )
 
 # Error kind => description
-TOKEN_ERROR_DESCRIPTION = Dict{TokenError, String}(
+TOKEN_ERROR_DESCRIPTION = Dict{TokenError,String}(
     EOF_MULTICOMMENT => "unterminated multi-line comment #= ... =#",
     EOF_STRING => "unterminated string literal",
     EOF_CHAR => "unterminated character literal",
@@ -51,8 +51,8 @@ abstract type AbstractToken end
 struct Token <: AbstractToken
     kind::Kind
     # Offsets into a string or buffer
-    startpos::Tuple{Int, Int} # row, col where token starts /end, col is a string index
-    endpos::Tuple{Int, Int}
+    startpos::Tuple{Int,Int} # row, col where token starts /end, col is a string index
+    endpos::Tuple{Int,Int}
     startbyte::Int # The byte where the token start in the buffer
     endbyte::Int # The byte where the token ended in the buffer
     val::String # The actual string of the token
@@ -60,28 +60,28 @@ struct Token <: AbstractToken
     dotop::Bool
     suffix::Bool
 end
-function Token(kind::Kind, startposition::Tuple{Int, Int}, endposition::Tuple{Int, Int},
+function Token(kind::Kind, startposition::Tuple{Int,Int}, endposition::Tuple{Int,Int},
     startbyte::Int, endbyte::Int, val::String)
-Token(kind, startposition, endposition, startbyte, endbyte, val, NO_ERR, false, false)
+    Token(kind, startposition, endposition, startbyte, endbyte, val, NO_ERR, false, false)
 end
-Token() = Token(ERROR, (0,0), (0,0), 0, 0, "", UNKNOWN, false, false)
+Token() = Token(ERROR, (0, 0), (0, 0), 0, 0, "", UNKNOWN, false, false)
 
 struct RawToken <: AbstractToken
     kind::Kind
     # Offsets into a string or buffer
-    startpos::Tuple{Int, Int} # row, col where token starts /end, col is a string index
-    endpos::Tuple{Int, Int}
+    startpos::Tuple{Int,Int} # row, col where token starts /end, col is a string index
+    endpos::Tuple{Int,Int}
     startbyte::Int # The byte where the token start in the buffer
     endbyte::Int # The byte where the token ended in the buffer
     token_error::TokenError
     dotop::Bool
     suffix::Bool
 end
-function RawToken(kind::Kind, startposition::Tuple{Int, Int}, endposition::Tuple{Int, Int},
+function RawToken(kind::Kind, startposition::Tuple{Int,Int}, endposition::Tuple{Int,Int},
     startbyte::Int, endbyte::Int)
-RawToken(kind, startposition, endposition, startbyte, endbyte, NO_ERR, false, false)
+    RawToken(kind, startposition, endposition, startbyte, endbyte, NO_ERR, false, false)
 end
-RawToken() = RawToken(ERROR, (0,0), (0,0), 0, 0, UNKNOWN, false, false)
+RawToken() = RawToken(ERROR, (0, 0), (0, 0), 0, 0, UNKNOWN, false, false)
 
 
 const _EMPTY_TOKEN = Token()
@@ -106,11 +106,11 @@ function untokenize(t::Token)
         return lowercase(string(t.kind))
     elseif isoperator(t.kind)
         if t.dotop
-            str = string(".", UNICODE_OPS_REVERSE[t.kind]) 
-        else 
-            str = string(UNICODE_OPS_REVERSE[t.kind]) 
-        end 
-        return string(str, t.val) 
+            str = string(".", UNICODE_OPS_REVERSE[t.kind])
+        else
+            str = string(UNICODE_OPS_REVERSE[t.kind])
+        end
+        return string(str, t.val)
     elseif t.kind == LPAREN
         return "("
     elseif t.kind == LSQUARE
