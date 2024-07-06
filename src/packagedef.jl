@@ -1,27 +1,21 @@
-include("vendored_code.jl")
+function find_test_detail!(node, testitems, testsetups, testerrors)
+    if kind(node) == K"macrocall" && haschildren(node) && node[1].val == Symbol("@testitem")
+        range = first_byte(node):last_byte(node)
 
-function find_test_detail!(node, testitems, testsetups, errors)
-    node isa EXPR || return
-
-    if node.head == :macrocall && length(node.args)>0 && CSTParser.valof(node.args[1]) == "@testitem"
-        pos = 1 + get_file_loc(node)[2]
-        range = pos:pos+node.span-1
-
-        # filter out line nodes
-        child_nodes = filter(i->!(isa(i, EXPR) && i.head==:NOTHING && i.args===nothing), node.args)
+        child_nodes = children(node)
 
         # Check for various syntax errors
         if length(child_nodes)==1
-            push!(errors, (error="Your @testitem is missing a name and code block.", range=range))
+            push!(testerrors, (message="Your @testitem is missing a name and code block.", range=range))
             return
-        elseif length(child_nodes)>1 && !(child_nodes[2] isa EXPR && child_nodes[2].head==:STRING)
-            push!(errors, (error="Your @testitem must have a first argument that is of type String for the name.", range=range))
+        elseif length(child_nodes)>1 && !(kind(child_nodes[2]) == K"string")
+            push!(testerrors, (message="Your @testitem must have a first argument that is of type String for the name.", range=range))
             return
         elseif length(child_nodes)==2
-            push!(errors, (error="Your @testitem is missing a code block argument.", range=range))
+            push!(testerrors, (message="Your @testitem is missing a code block argument.", range=range))
             return
-        elseif !(child_nodes[end] isa EXPR && child_nodes[end].head==:block)
-            push!(errors, (error="The final argument of a @testitem must be a begin end block.", range=range))
+        elseif !(kind(child_nodes[end]) == K"block")
+            push!(testerrors, (message="The final argument of a @testitem must be a begin end block.", range=range))
             return
         else
             option_tags = nothing
@@ -30,66 +24,67 @@ function find_test_detail!(node, testitems, testsetups, errors)
 
             # Now check our keyword args
             for i in child_nodes[3:end-1]
-                if !(i isa EXPR && i.head isa EXPR && i.head.head==:OPERATOR && CSTParser.valof(i.head)=="=")
-                    push!(errors, (error="The arguments to a @testitem must be in keyword format.", range=range))
+                if kind(i) != K"="
+                    push!(testerrors, (message="The arguments to a @testitem must be in keyword format.", range=range))
                     return
-                elseif !(length(i.args)==2)
+                elseif !(length(children(i))==2)
                     error("This code path should not be possible.")
-                elseif CSTParser.valof(i.args[1])=="tags"
+                elseif kind(i[1]) == K"Identifier" && i[1].val == :tags
                     if option_tags!==nothing
-                        push!(errors, (error="The keyword argument tags cannot be specified more than once.", range=range))
+                        push!(testerrors, (message="The keyword argument tags cannot be specified more than once.", range=range))
                         return
                     end
 
-                    if !(i.args[2].head == :vect)
-                        push!(errors, (error="The keyword argument tags only accepts a vector of symbols.", range=range))
+                    if kind(i[2]) != K"vect"
+                        push!(testerrors, (message="The keyword argument tags only accepts a vector of symbols.", range=range))
                         return
                     end
 
                     option_tags = Symbol[]
 
-                    for j in i.args[2].args
-                        if !(j isa EXPR && j.head==:quotenode && length(j.args)==1 && j.args[1] isa EXPR && j.args[1].head==:IDENTIFIER)
-                            push!(errors, (error="The keyword argument tags only accepts a vector of symbols.", range=range))
+                    for j in children(i[2])
+                        if kind(j) != K"quote" || length(children(j)) != 1 || kind(j[1]) != K"Identifier"
+                            push!(testerrors, (message="The keyword argument tags only accepts a vector of symbols.", range=range))
                             return
                         end
 
-                        push!(option_tags, Symbol(CSTParser.valof(j.args[1])))
+                        push!(option_tags, j[1].val)
                     end
-                elseif CSTParser.valof(i.args[1])=="default_imports"
-                    if option_default_imports!==nothing
-                        push!(errors, (error="The keyword argument default_imports cannot be specified more than once.", range=range))
+                elseif kind(i[1]) == K"Identifier" && i[1].val == :default_imports
+                    if option_default_imports !== nothing
+                        push!(testerrors, (message="The keyword argument default_imports cannot be specified more than once.", range=range))
                         return
                     end
 
-                    if !(CSTParser.valof(i.args[2]) in ("true", "false"))
-                        push!(errors, (error="The keyword argument default_imports only accepts bool values.", range=range))
+                    if !(i[2].val in (true, false))
+                        push!(testerrors, (message="The keyword argument default_imports only accepts bool values.", range=range))
                         return
                     end
 
-                    option_default_imports = parse(Bool, CSTParser.valof(i.args[2]))
-                elseif CSTParser.valof(i.args[1])=="setup"
+                    option_default_imports = i[2].val
+                elseif kind(i[1]) == K"Identifier" && i[1].val == :setup
                     if option_setup!==nothing
-                        push!(errors, (error="The keyword argument setup cannot be specified more than once.", range=range))
+                        push!(testerrors, (message="The keyword argument setup cannot be specified more than once.", range=range))
                         return
                     end
 
-                    if !(i.args[2].head == :vect)
-                        push!(errors, (error="The keyword argument `setup` only accepts a vector of `@testsetup` names.", range=range))
+                    if kind(i[2]) != K"vect"
+                        push!(testerrors, (message="The keyword argument `setup` only accepts a vector of `@testsetup module` names.", range=range))
                         return
                     end
+
                     option_setup = Symbol[]
 
-                    for j in i.args[2].args
-                        if !(j isa EXPR && j.head==:IDENTIFIER)
-                            push!(errors, (error="The keyword argument `setup` only accepts a vector of `@testsetup` names.", range=range))
+                    for j in children(i[2])
+                        if kind(j) != K"Identifier"
+                            push!(testerrors, (message="The keyword argument `setup` only accepts a vector of `@testsetup module` names.", range=range))
                             return
                         end
 
-                        push!(option_setup, Symbol(CSTParser.valof(j)))
+                        push!(option_setup, j.val)
                     end
                 else
-                    push!(errors, (error="Unknown keyword argument.", range=range))
+                    push!(testerrors, (message="Unknown keyword argument.", range=range))
                     return
                 end
             end
@@ -106,44 +101,94 @@ function find_test_detail!(node, testitems, testsetups, errors)
                 option_setup = Symbol[]
             end
 
-            # TODO + 1 here is from the space before the begin end block. We might have to detect that,
-            # not sure whether that is always assigned to the begin end block EXPR
-            code_pos = get_file_loc(child_nodes[end])[2] + 1 + length("begin")
+            code_block = child_nodes[end]
+            code_range = if haschildren(code_block) && length(children(code_block)) > 0
+                first_byte(code_block[1]):last_byte(code_block[end])
+            else
+                (first_byte(code_block)+5):(last_byte(code_block)-3)
+            end
 
-            code_range = code_pos:code_pos+child_nodes[end].span - 1 - length("begin") - length("end")
-
-            push!(testitems, (name=CSTParser.valof(node.args[3]), range=range, code_range=code_range, option_default_imports=option_default_imports, option_tags=option_tags, option_setup=option_setup))
+            push!(testitems,
+                    (
+                    name=node[2,1].val,
+                    range=range,
+                    code_range=code_range,
+                    option_default_imports=option_default_imports,
+                    option_tags=option_tags,
+                    option_setup=option_setup
+                )
+            )
         end
-    elseif node.head == :macrocall && length(node.args)>0 && CSTParser.valof(node.args[1]) == "@testsetup"
-        pos = 1 + get_file_loc(node)[2]
-        range = pos:pos+node.span-1
+    elseif kind(node) == K"macrocall" && haschildren(node) && (node[1].val == Symbol("@testmodule") || node[1].val == Symbol("@testsnippet"))
+        range = first_byte(node):last_byte(node)
 
-        # filter out line nodes
-        child_nodes = filter(i->!(isa(i, EXPR) && i.head==:NOTHING && i.args===nothing), node.args)
+        testkind = node[1].val
+
+        child_nodes = children(node)
 
         # Check for various syntax errors
         if length(child_nodes)==1
-            push!(errors, (error="Your @testsetup is missing a name and code block.", range=range))
+            push!(testerrors, (message="Your $testkind is missing a name and code block.", range=range))
             return
-        elseif length(child_nodes)>1 && !(child_nodes[2] isa EXPR && child_nodes[2].head==:IDENTIFIER)
-            push!(errors, (error="Your @testsetup must have a first argument that is a valid identifier for the name.", range=range))
+        elseif length(child_nodes)>1 && !(kind(child_nodes[2]) == K"Identifier")
+            println("THE KIND IS $(kind(child_nodes[2]))")
+            push!(testerrors, (message="Your $testkind must have a first argument that is an identifier for the name.", range=range))
             return
         elseif length(child_nodes)==2
-            push!(errors, (error="Your @testsetup is missing a code block argument.", range=range))
+            push!(testerrors, (message="Your $testkind is missing a code block argument.", range=range))
             return
-        elseif !(child_nodes[end] isa EXPR && child_nodes[end].head==:block)
-            push!(errors, (error="The final argument of a @testsetup must be a begin end block.", range=range))
+        elseif !(kind(child_nodes[end]) == K"block")
+            push!(testerrors, (message="The final argument of a $testkind must be a begin end block.", range=range))
             return
         else
-            # TODO + 1 here is from the space before the begin end block. We might have to detect that,
-            # not sure whether that is always assigned to the begin end block EXPR
-            code_pos = get_file_loc(child_nodes[end])[2] + 1 + length("begin")
-            code_range = code_pos:code_pos+child_nodes[end].span - 1 - length("begin") - length("end")
-            push!(testsetups, (name=CSTParser.valof(node.args[3]), range=range, code_range=code_range))
+            # Now check our keyword args
+            for i in child_nodes[3:end-1]
+                if kind(i) != K"="
+                    push!(testerrors, (message="The arguments to a $testkind must be in keyword format.", range=range))
+                    return
+                elseif !(length(children(i))==2)
+                    error("This code path should not be possible.")
+                else
+                    push!(testerrors, (message="Unknown keyword argument.", range=range))
+                    return
+                end
+            end
+
+            mod_name = child_nodes[2].val
+            code_block = child_nodes[end]
+            code_range = if haschildren(code_block) && length(children(code_block)) > 0
+                first_byte(code_block[1]):last_byte(code_block[end])
+            else
+                (first_byte(code_block)+5):(last_byte(code_block)-3)
+            end
+
+            testkind2 = if testkind==Symbol("@testmodule")
+                :module
+            elseif testkind==Symbol("@testsnippet")
+                :snippet
+            else
+                error("Unknown testkind")
+            end
+
+            push!(
+                testsetups,
+                (
+                    name=mod_name,
+                    kind=testkind2,
+                    range=range,
+                    code_range=code_range
+                )
+            )
         end
-    elseif node.head == :module && length(node.args)>=3 && node.args[3] isa EXPR && node.args[3].head==:block
-        for i in node.args[3].args
-            find_test_detail!(i, testitems, testsetups, errors)
+    elseif kind(node) == K"toplevel"
+        for i in children(node)
+            find_test_detail!(i, testitems, testsetups, testerrors)
+        end
+    elseif kind(node) == K"module"
+        find_test_detail!(node[2], testitems, testsetups, testerrors)
+    elseif kind(node) == K"block"
+        for i in children(node)
+            find_test_detail!(i, testitems, testsetups, testerrors)
         end
     end
 end
