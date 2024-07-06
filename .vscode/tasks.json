@@ -4,10 +4,10 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "Pull latest version of CSTParser",
+            "label": "Pull latest version of JuliaSyntax",
             "type": "process",
             "command": "git",
-            "args": ["subtree", "pull", "--prefix", "packages/CSTParser", "https://github.com/julia-vscode/CSTParser.jl", "master", "--squash"],
+            "args": ["subtree", "pull", "--prefix", "packages/JuliaSyntax", "https://github.com/JuliaLang/JuliaSyntax.jl", "main", "--squash"],
             "problemMatcher": []
         },
         {
@@ -15,13 +15,6 @@
             "type": "process",
             "command": "git",
             "args": ["subtree", "pull", "--prefix", "packages/TestItemDetection", "https://github.com/julia-vscode/TestItemDetection.jl", "main", "--squash"],
-            "problemMatcher": []
-        },
-        {
-            "label": "Pull latest version of Tokenize",
-            "type": "process",
-            "command": "git",
-            "args": ["subtree", "pull", "--prefix", "packages/Tokenize", "https://github.com/JuliaLang/Tokenize.jl", "master", "--squash"],
             "problemMatcher": []
         }
     ]
