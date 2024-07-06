@@ -92,7 +92,7 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
         end
     end
 
-    code = string('\n'^line, ' '^column, original_code)
+    code = string('\n'^(line-1), ' '^(column-1), original_code)
 
     withpath(filepath) do
         Base.invokelatest(include_string, mod, code, filepath)
