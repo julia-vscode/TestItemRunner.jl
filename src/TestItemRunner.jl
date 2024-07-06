@@ -1,29 +1,15 @@
 module TestItemRunner
 
-include("../packages/Tokenize/src/Tokenize.jl")
-
-module CSTParser
-    using ..Tokenize
-    import ..Tokenize.Tokens
-    import ..Tokenize.Tokens: RawToken, AbstractToken, iskeyword, isliteral, isoperator, untokenize
-    import ..Tokenize.Lexers: Lexer, peekchar, iswhitespace, readchar, emit, emit_error,  accept_batch, eof
-
-    include("../packages/CSTParser/src/packagedef.jl")
-end
-
-include("../packages/JuliaWorkspaces/src/JuliaWorkspaces.jl")
+include("../packages/JuliaSyntax/src/JuliaSyntax.jl")
 
 module TestItemDetection
-    import ..CSTParser
-    using ..CSTParser: EXPR
-    using ..JuliaWorkspaces: JuliaWorkspace
-    using ..JuliaWorkspaces.URIs2: URI
+    import ..JuliaSyntax
+    using ..JuliaSyntax: @K_str, kind, children, haschildren, first_byte, last_byte, SyntaxNode
 
     include("../packages/TestItemDetection/src/packagedef.jl")
 end
 
-import .CSTParser, Test, TestItems, TOML
-using .CSTParser: EXPR, parentof, headof
+import Test, TestItems, TOML
 using TestItems: @testitem
 
 include("vendored_code.jl")
@@ -81,7 +67,7 @@ function ensure_evaled(test_setup_module_set, filename, code, name, line, column
     return
 end
 
-function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set)
+function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set, testsetups)
     mod = Core.eval(Main, :(module $(gensym()) end))
 
     if use_default_usings
@@ -93,7 +79,17 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
     end
 
     for m in setups
-        Core.eval(mod, Expr(:using, Expr(:., :., :., nameof(test_setup_module_set.setupmodule), m)))
+        setup_details = testsetups[m]
+        if setup_details.kind==:module
+            Core.eval(mod, Expr(:using, Expr(:., :., :., nameof(test_setup_module_set.setupmodule), m)))
+        elseif setup_details.kind==:snippet
+            snippet_code = string('\n'^setup_details.line, ' '^setup_details.column, setup_details.code)
+            withpath(setup_details.filename) do
+                Base.invokelatest(include_string, mod, snippet_code, setup_details.filename)
+            end
+        else
+            error("Unknown test setup")
+        end
     end
 
     code = string('\n'^line, ' '^column, original_code)
@@ -130,17 +126,18 @@ function run_tests(path; filter=nothing, verbose=false)
     # Find all @testitems and @testsetup
     testitems = Dict{String,Vector}()
     # testsetups maps @testsetup NAME => (filename, code, name, line, column)
-    testsetups = Dict{String,Any}()
+    testsetups = Dict{Symbol,Any}()
     for file in julia_files
         content = read(file, String)
-        cst = CSTParser.parse(content, true)
+
+        stream = JuliaSyntax.ParseStream(content; version=VERSION)
+        JuliaSyntax.parse!(stream; rule=:all)
+        tree = JuliaSyntax.build_tree(JuliaSyntax.SyntaxNode, stream)
 
         testitems_for_file = []
         testsetups_for_file = []
         errors_for_file = []
-        for i in cst.args
-            TestItemDetection.find_test_detail!(i, testitems_for_file, testsetups_for_file, errors_for_file)
-        end
+        TestItemDetection.find_test_detail!(tree, testitems_for_file, testsetups_for_file, errors_for_file)
 
         if length(errors_for_file) > 0
             @warn "Error in your test item or test setup definition" file errors=errors_for_file
@@ -151,7 +148,7 @@ function run_tests(path; filter=nothing, verbose=false)
             testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, option_setup=i.option_setup, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
         end
         for i in testsetups_for_file
-            testsetups[i.name] = (filename=file, code=content[i.code_range], name=Symbol(i.name), compute_line_column(content, i.code_range.start)...)
+            testsetups[i.name] = (filename=file, code=content[i.code_range], name=Symbol(i.name), kind=i.kind, compute_line_column(content, i.code_range.start)...)
         end
     end
 
@@ -170,19 +167,26 @@ function run_tests(path; filter=nothing, verbose=false)
     for (file, testitems) in pairs(testitems)
         Test.push_testset(testset(relpath(file, path); verbose=verbose))
         for testitem in testitems
+            snippets_to_run = []
             if !isempty(testitem.option_setup)
                 for setup in testitem.option_setup
-                    key = String(setup)
+                    key = setup
                     if haskey(testsetups, key)
                         testsetup = testsetups[key]
-                        ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
+                        if testsetup.kind==:module
+                            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
+                        elseif testsetup.kind==:snippet
+                            push!(snippets_to_run, testsetup)
+                        else
+                            error("Unknown setup type")
+                        end
                     else
                         error("Test setup $(setup) is not defined.")
                     end
                 end
             end
             Test.push_testset(testset(testitem.name; verbose=verbose))
-            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set)
+            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
             Test.finish(Test.pop_testset())
         end
         Test.finish(Test.pop_testset())
