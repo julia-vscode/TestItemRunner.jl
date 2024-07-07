@@ -189,5 +189,9 @@ function find_test_detail!(node, testitems, testsetups, testerrors)
         for i in children(node)
             find_test_detail!(i, testitems, testsetups, testerrors)
         end
+    elseif kind(node) == K"doc"
+        for i in children(node)
+            find_test_detail!(i, testitems, testsetups, testerrors)
+        end
     end
 end
