@@ -1,16 +1,16 @@
 name = "TestItemRunner"
 uuid = "f8b46487-2199-4994-9208-9a1283c18c0a"
 authors = ["David Anthoff <anthoff@berkeley.edu>"]
-version = "1.0.1-DEV"
+version = "1.0.1"
 
 [deps]
 Pkg = "44cfe95a-1eb2-52ea-b672-e2afdf69b78f"
-TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 TestItems = "1c621080-faea-4a02-84b6-bbd5e436b8fe"
 UUIDs = "cf7118a7-6976-5b1a-9a39-7adc72f591a4"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
-TOML = "1"
-TestItems = "0.1,1"
 julia = "1"
+TestItems = "0.1,1"
+TOML = "1"
