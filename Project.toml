@@ -1,7 +1,7 @@
 name = "TestItemDetection"
 uuid = "76b0de8b-5c4b-48ef-a724-914b33ca988d"
 authors = ["David Anthoff <anthoff@berkeley.edu>"]
-version = "1.0.2-DEV"
+version = "1.0.3-DEV"
 
 [deps]
 JuliaSyntax = "70703baa-626e-46a2-a12c-08ffd08c73b4"
