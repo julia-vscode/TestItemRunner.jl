@@ -12,4 +12,4 @@ TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
 julia = "1"
-TestItems = "0.1"
+TestItems = "0.1,1"
