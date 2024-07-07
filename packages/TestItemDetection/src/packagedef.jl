@@ -131,7 +131,6 @@ function find_test_detail!(node, testitems, testsetups, testerrors)
             push!(testerrors, (message="Your $testkind is missing a name and code block.", range=range))
             return
         elseif length(child_nodes)>1 && !(kind(child_nodes[2]) == K"Identifier")
-            println("THE KIND IS $(kind(child_nodes[2]))")
             push!(testerrors, (message="Your $testkind must have a first argument that is an identifier for the name.", range=range))
             return
         elseif length(child_nodes)==2
