@@ -68,10 +68,11 @@ struct TestSetupModuleSet
     modules::Set{Symbol}
 end
 
-function ensure_evaled(test_setup_module_set, filename, code, name, line, column)
+function ensure_evaled(test_setup_module_set, filename, code, name, line, column, working_dir)
     if !(name in test_setup_module_set.modules)
         mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
         code = string('\n'^line, ' '^column, code)
+        cd(working_dir)
         withpath(filename) do
             Base.invokelatest(include_string, mod, code, filename)
         end
@@ -81,6 +82,9 @@ function ensure_evaled(test_setup_module_set, filename, code, name, line, column
 end
 
 function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set, testsetups)
+    working_dir = dirname(filepath)
+    cd(working_dir)
+    
     mod = Core.eval(Main, :(module $(gensym()) end))
 
     if use_default_usings
@@ -197,7 +201,8 @@ function run_tests(path; filter=nothing, verbose=false)
                     if haskey(testsetups, key)
                         testsetup = testsetups[key]
                         if testsetup.kind==:module
-                            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
+                            working_dir = dirname(file)
+                            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
                         elseif testsetup.kind==:snippet
                             push!(snippets_to_run, testsetup)
                         else
