@@ -72,9 +72,10 @@ function ensure_evaled(test_setup_module_set, filename, code, name, line, column
     if !(name in test_setup_module_set.modules)
         mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
         code = string('\n'^line, ' '^column, code)
-        cd(working_dir)
-        withpath(filename) do
-            Base.invokelatest(include_string, mod, code, filename)
+        cd(working_dir) do
+            withpath(filename) do
+                Base.invokelatest(include_string, mod, code, filename)
+            end
         end
     end
     push!(test_setup_module_set.modules, name)
@@ -83,8 +84,7 @@ end
 
 function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set, testsetups)
     working_dir = dirname(filepath)
-    cd(working_dir)
-    
+
     mod = Core.eval(Main, :(module $(gensym()) end))
 
     if use_default_usings
@@ -101,8 +101,10 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
             Core.eval(mod, Expr(:using, Expr(:., :., :., nameof(test_setup_module_set.setupmodule), m)))
         elseif setup_details.kind==:snippet
             snippet_code = string('\n'^setup_details.line, ' '^setup_details.column, setup_details.code)
-            withpath(setup_details.filename) do
-                Base.invokelatest(include_string, mod, snippet_code, setup_details.filename)
+            cd(working_dir) do
+                withpath(setup_details.filename) do
+                    Base.invokelatest(include_string, mod, snippet_code, setup_details.filename)
+                end
             end
         else
             error("Unknown test setup")
@@ -111,8 +113,10 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
 
     code = string('\n'^(line-1), ' '^(column-1), original_code)
 
-    withpath(filepath) do
-        Base.invokelatest(include_string, mod, code, filepath)
+    cd(working_dir) do
+        withpath(filepath) do
+            Base.invokelatest(include_string, mod, code, filepath)
+        end
     end
 end
 
