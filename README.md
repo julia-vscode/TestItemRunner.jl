@@ -6,4 +6,5 @@
 
 ## Overview
 
-This package runs `@testitem` tests. You can learn more over at the [documentation](https://www.julia-vscode.org/docs/stable/userguide/testitems/) for the entire test item ecosystem.
+This package runs `@testitem` tests. You can learn more over at the [documentation](https://www.julia-vscode.org/docs/stable/userguide/testitems/) for the entire test item ecosystem. Note that while the documentation is hosted as part of the Julia VS Code extension, the test item framework is not a VS Code extension specific technology and can be used entirely without VS Code.
+
