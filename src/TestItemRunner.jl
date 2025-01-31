@@ -24,11 +24,11 @@ module TestItemDetection
 end
 
 import Test, TestItems, TOML
-using TestItems: @testitem
+using TestItems: @testitem, @testmodule, @testsnippet
 
 include("vendored_code.jl")
 
-export @run_package_tests, @testitem
+export @run_package_tests, @testitem, @testmodule, @testsnippet
 
 function compute_line_column(content, target_pos)
     line = 1
