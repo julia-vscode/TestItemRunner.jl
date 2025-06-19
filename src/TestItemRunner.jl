@@ -130,7 +130,7 @@ Run all test items in a directory and its subdirectories.
 - `filter`: A filter function to apply to the test items.
 - `verbose`: Whether to run the tests in verbose mode.
 """
-function run_tests(path; filter=nothing, verbose=false)
+function run_tests(path; filter=nothing, verbose=false, testset=testset)
     # Find package name
     package_name = ""
     package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
@@ -230,7 +230,7 @@ end
 """
     @run_package_tests(ex...)
 
-Run all test items in a package, using optional filter and verbosity arguments.
+Run all test items in a package, using optional filter, verbosity and testset arguments.
 
 # Usage
 ```julia
@@ -244,12 +244,13 @@ Run all test items in a package, using optional filter and verbosity arguments.
 # Arguments
 - `filter`: An optional filter function to apply to the test items.
 - `verbose`: An optional argument to specify verbosity.
+- `testset`: An optional argument to specify a custom testset type to use.
 """
 macro run_package_tests(ex...)
     kwargs = []
 
     for i in ex
-        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose)
+        if i isa Expr && i.head == :(=) && length(i.args) == 2 && i.args[1] in (:filter, :verbose, :testset)
             push!(kwargs, esc(i))
         else
             error("Invalid argument")
