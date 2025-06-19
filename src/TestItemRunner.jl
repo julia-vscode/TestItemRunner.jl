@@ -224,7 +224,8 @@ function run_tests(path; filter=nothing, verbose=false)
         Test.finish(Test.pop_testset())
     end
     ts = Test.pop_testset()
-    Test.finish(ts)
+    # Outer testset generates report that needs to integrate results from nested (custom) testsets
+    Base.invokelatest(Test.finish, ts)
 end
 
 """
