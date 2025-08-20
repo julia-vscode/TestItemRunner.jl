@@ -129,6 +129,7 @@ Run all test items in a directory and its subdirectories.
 - `path`: The path to the directory containing the tests.
 - `filter`: A filter function to apply to the test items.
 - `verbose`: Whether to run the tests in verbose mode.
+- `testset`: An optional argument to specify a custom testset type or function to use. It must accept the `verbose` keyword argument.
 """
 function run_tests(path; filter=nothing, verbose=false, testset=testset)
     # Find package name
@@ -244,7 +245,7 @@ Run all test items in a package, using optional filter, verbosity and testset ar
 # Arguments
 - `filter`: An optional filter function to apply to the test items.
 - `verbose`: An optional argument to specify verbosity.
-- `testset`: An optional argument to specify a custom testset type to use.
+- `testset`: An optional argument to specify a custom testset type or function to use. It must accept the `verbose` keyword argument.
 """
 macro run_package_tests(ex...)
     kwargs = []
