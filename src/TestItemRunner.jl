@@ -194,38 +194,79 @@ function run_tests(path; filter=nothing, verbose=false)
     # Run testitems
     test_setup_module = Core.eval(Main, :(module $(gensym()) end))
     test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}())
-    Test.push_testset(testset("Package"; verbose=verbose))
-    for (file, testitems) in pairs(testitems)
-        Test.push_testset(testset(relpath(file, path); verbose=verbose))
-        for testitem in testitems
-            snippets_to_run = []
-            if !isempty(testitem.option_setup)
-                for setup in testitem.option_setup
-                    key = setup
-                    if haskey(testsetups, key)
-                        testsetup = testsetups[key]
-                        if testsetup.kind==:module
-                            working_dir = dirname(file)
-                            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
-                        elseif testsetup.kind==:snippet
-                            push!(snippets_to_run, testsetup)
+
+    @static if VERSION ≤ v"1.12"
+        Test.push_testset(testset("Package"; verbose=verbose))
+        for (file, testitems) in pairs(testitems)
+            Test.push_testset(testset(relpath(file, path); verbose=verbose))
+            for testitem in testitems
+                snippets_to_run = []
+                if !isempty(testitem.option_setup)
+                    for setup in testitem.option_setup
+                        key = setup
+                        if haskey(testsetups, key)
+                            testsetup = testsetups[key]
+                            if testsetup.kind==:module
+                                working_dir = dirname(file)
+                                ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
+                            elseif testsetup.kind==:snippet
+                                push!(snippets_to_run, testsetup)
+                            else
+                                error("Unknown setup type")
+                            end
                         else
-                            error("Unknown setup type")
+                            error("Test setup $(setup) is not defined.")
                         end
-                    else
-                        error("Test setup $(setup) is not defined.")
                     end
                 end
+                Test.push_testset(testset(testitem.name; verbose=verbose))
+                run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+                Test.finish(Test.pop_testset())
             end
-            Test.push_testset(testset(testitem.name; verbose=verbose))
-            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
             Test.finish(Test.pop_testset())
         end
-        Test.finish(Test.pop_testset())
+        ts = Test.pop_testset()
+        # Outer testset generates report that needs to integrate results from nested (custom) testsets
+        Base.invokelatest(Test.finish, ts)
+    else
+        ts_1 = testset("Package"; verbose=verbose)
+        Test.@with_testset ts_1 begin
+            for (file, testitems) in pairs(testitems)
+                ts_2 = testset(relpath(file, path); verbose=verbose)
+                Test.@with_testset ts_2 begin
+                    for testitem in testitems
+                        snippets_to_run = []
+                        if !isempty(testitem.option_setup)
+                            for setup in testitem.option_setup
+                                key = setup
+                                if haskey(testsetups, key)
+                                    testsetup = testsetups[key]
+                                    if testsetup.kind==:module
+                                        working_dir = dirname(file)
+                                        ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
+                                    elseif testsetup.kind==:snippet
+                                        push!(snippets_to_run, testsetup)
+                                    else
+                                        error("Unknown setup type")
+                                    end
+                                else
+                                    error("Test setup $(setup) is not defined.")
+                                end
+                            end
+                        end
+                        ts_3 = testset(testitem.name; verbose=verbose)
+                        Test.@with_testset ts_3 begin
+                            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+                        end
+                        Test.finish(ts_3)
+                    end
+                end
+                Test.finish(ts_2)
+            end
+        end
+        # Outer testset generates report that needs to integrate results from nested (custom) testsets
+        Base.invokelatest(Test.finish, ts_1)
     end
-    ts = Test.pop_testset()
-    # Outer testset generates report that needs to integrate results from nested (custom) testsets
-    Base.invokelatest(Test.finish, ts)
 end
 
 """
