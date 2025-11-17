@@ -195,7 +195,7 @@ function run_tests(path; filter=nothing, verbose=false)
     test_setup_module = Core.eval(Main, :(module $(gensym()) end))
     test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}())
 
-    @static if VERSION ≤ v"1.12"
+    @static if VERSION ≤ v"1.13-"
         Test.push_testset(testset("Package"; verbose=verbose))
         for (file, testitems) in pairs(testitems)
             Test.push_testset(testset(relpath(file, path); verbose=verbose))
