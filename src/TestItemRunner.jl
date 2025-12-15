@@ -131,6 +131,8 @@ Run all test items in a directory and its subdirectories.
 - `verbose`: Whether to run the tests in verbose mode.
 """
 function run_tests(path; filter=nothing, verbose=false)
+    path = abspath(path)
+
     # Find package name
     package_name = ""
     package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
@@ -197,37 +199,46 @@ function run_tests(path; filter=nothing, verbose=false)
 
     @static if VERSION ≤ v"1.13-"
         Test.push_testset(testset("Package"; verbose=verbose))
-        for (file, testitems) in pairs(testitems)
-            Test.push_testset(testset(relpath(file, path); verbose=verbose))
-            for testitem in testitems
-                snippets_to_run = []
-                if !isempty(testitem.option_setup)
-                    for setup in testitem.option_setup
-                        key = setup
-                        if haskey(testsetups, key)
-                            testsetup = testsetups[key]
-                            if testsetup.kind==:module
-                                working_dir = dirname(file)
-                                ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
-                            elseif testsetup.kind==:snippet
-                                push!(snippets_to_run, testsetup)
-                            else
-                                error("Unknown setup type")
+        try
+            for (file, testitems) in pairs(testitems)
+                Test.push_testset(testset(relpath(file, path); verbose=verbose))
+                try
+                    for testitem in testitems
+                        snippets_to_run = []
+                        if !isempty(testitem.option_setup)
+                            for setup in testitem.option_setup
+                                key = setup
+                                if haskey(testsetups, key)
+                                    testsetup = testsetups[key]
+                                    if testsetup.kind==:module
+                                        working_dir = dirname(file)
+                                        ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
+                                    elseif testsetup.kind==:snippet
+                                        push!(snippets_to_run, testsetup)
+                                    else
+                                        error("Unknown setup type")
+                                    end
+                                else
+                                    error("Test setup $(setup) is not defined.")
+                                end
                             end
-                        else
-                            error("Test setup $(setup) is not defined.")
+                        end
+                        Test.push_testset(testset(testitem.name; verbose=verbose))
+                        try
+                            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+                        finally
+                            Test.finish(Test.pop_testset())
                         end
                     end
+                finally
+                    Test.finish(Test.pop_testset())
                 end
-                Test.push_testset(testset(testitem.name; verbose=verbose))
-                run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
-                Test.finish(Test.pop_testset())
             end
-            Test.finish(Test.pop_testset())
+        finally
+            ts = Test.pop_testset()
+            # Outer testset generates report that needs to integrate results from nested (custom) testsets
+            Base.invokelatest(Test.finish, ts)
         end
-        ts = Test.pop_testset()
-        # Outer testset generates report that needs to integrate results from nested (custom) testsets
-        Base.invokelatest(Test.finish, ts)
     else
         ts_1 = testset("Package"; verbose=verbose)
         Test.@with_testset ts_1 begin

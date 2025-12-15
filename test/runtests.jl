@@ -5,6 +5,11 @@ using TestItems, TestItemRunner
     @test true
 end
 
+@testitem "@__DIR__ resolves correctly" begin
+    @test @__DIR__() == pwd()
+    @test @__DIR__() == dirname(@__FILE__)
+end
+
 @testmodule TestSetup begin
     const x = 10
     getfloat() = rand()
