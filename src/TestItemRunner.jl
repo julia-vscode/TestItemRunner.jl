@@ -50,17 +50,18 @@ function compute_line_column(content, target_pos)
 end
 
 @testitem "compute_line_column" begin
+    using TestItemRunner: compute_line_column
     content = "abc\ndef\nghi"
 
-    @test TestItemRunner.compute_line_column(content, 1) == (line=1, column=1)
-    @test TestItemRunner.compute_line_column(content, 2) == (line=1, column=2)
-    @test TestItemRunner.compute_line_column(content, 3) == (line=1, column=3)
-    @test TestItemRunner.compute_line_column(content, 5) == (line=2, column=1)
-    @test TestItemRunner.compute_line_column(content, 6) == (line=2, column=2)
-    @test TestItemRunner.compute_line_column(content, 7) == (line=2, column=3)
-    @test TestItemRunner.compute_line_column(content, 9) == (line=3, column=1)
-    @test TestItemRunner.compute_line_column(content, 10) == (line=3, column=2)
-    @test TestItemRunner.compute_line_column(content, 11) == (line=3, column=3)
+    @test compute_line_column(content, 1) == (line=1, column=1)
+    @test compute_line_column(content, 2) == (line=1, column=2)
+    @test compute_line_column(content, 3) == (line=1, column=3)
+    @test compute_line_column(content, 5) == (line=2, column=1)
+    @test compute_line_column(content, 6) == (line=2, column=2)
+    @test compute_line_column(content, 7) == (line=2, column=3)
+    @test compute_line_column(content, 9) == (line=3, column=1)
+    @test compute_line_column(content, 10) == (line=3, column=2)
+    @test compute_line_column(content, 11) == (line=3, column=3)
 end
 
 struct TestSetupModuleSet
@@ -224,8 +225,12 @@ function run_tests(path; filter=nothing, verbose=false)
                             end
                         end
                         Test.push_testset(testset(testitem.name; verbose=verbose))
+                        ts = Test.get_testset()
                         try
                             run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+                        catch err
+                            err isa InterruptException && rethrow()
+                            Test.record(ts, Test.Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
                         finally
                             Test.finish(Test.pop_testset())
                         end
@@ -267,7 +272,12 @@ function run_tests(path; filter=nothing, verbose=false)
                         end
                         ts_3 = testset(testitem.name; verbose=verbose)
                         Test.@with_testset ts_3 begin
-                            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+                            try
+                                run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+                            catch err
+                                err isa InterruptException && rethrow()
+                                Test.record(ts_3, Test.Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
+                            end
                         end
                         Test.finish(ts_3)
                     end
