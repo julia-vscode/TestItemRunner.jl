@@ -1,0 +1,3 @@
+# This file replaces the one in the parent folder for everything below this
+# folder, rather than adding to it, so the `excluded` folder next to it is
+# searched for test items.

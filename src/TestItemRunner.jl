@@ -18,7 +18,7 @@ include("../packages/JuliaSyntax/src/JuliaSyntax.jl")
 
 module TestItemDetection
     import ..JuliaSyntax
-    using ..JuliaSyntax: @K_str, kind, children, haschildren, first_byte, last_byte, SyntaxNode
+    using ..JuliaSyntax: @K_str, kind, children, SyntaxNode
 
     include("../packages/TestItemDetection/src/packagedef.jl")
 end
@@ -27,6 +27,7 @@ import Test, TestItems, TOML
 using TestItems: @testitem, @testmodule, @testsnippet
 
 include("vendored_code.jl")
+include("testitems_config.jl")
 
 export @run_package_tests, @testitem, @testmodule, @testsnippet
 
@@ -83,10 +84,48 @@ function ensure_evaled(test_setup_module_set, filename, code, name, line, column
     return
 end
 
-function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set, testsetups)
-    working_dir = dirname(filepath)
+"""
+    evaluate_skip(mod, filepath, skip)
 
-    mod = Core.eval(Main, :(module $(gensym()) end))
+Evaluate the expression of a `skip` keyword argument that was not a `Bool`
+literal, in the module `mod` the test item would run in.
+
+`skip` carries the source text of the expression and its position, so that the
+expression is evaluated with the line numbers it has in the original file.
+"""
+function evaluate_skip(mod, filepath, skip)
+    code = string('\n'^(skip.line-1), ' '^(skip.column-1), skip.code)
+
+    result = cd(dirname(filepath)) do
+        withpath(filepath) do
+            Base.invokelatest(include_string, mod, code, filepath)
+        end
+    end
+
+    result isa Bool || error("The `skip` keyword argument must evaluate to a `Bool`, but it evaluated to a value of type $(typeof(result)).")
+
+    return result
+end
+
+function ensure_setups_evaled(testitem, test_setup_module_set, testsetups)
+    working_dir = dirname(testitem.filename)
+
+    for setup in testitem.option_setup
+        haskey(testsetups, setup) || error("Test setup $(setup) is not defined.")
+
+        testsetup = testsetups[setup]
+
+        if testsetup.kind == :module
+            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
+        elseif testsetup.kind != :snippet
+            # Snippets are evaluated in the test item's own module by `run_testitem`
+            error("Unknown setup type")
+        end
+    end
+end
+
+function run_testitem(mod, filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set, testsetups)
+    working_dir = dirname(filepath)
 
     if use_default_usings
         Core.eval(mod, :(using Test))
@@ -122,6 +161,124 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
 end
 
 """
+    run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
+
+Run a single test item, recording its result into the test set `ts` that was
+created for it.
+
+A test item that is skipped is recorded as broken, the same result `@test_skip`
+produces, so that skipped test items stay visible in the test summary without
+failing the run. Anything that goes wrong while preparing the test item, be it
+in a test setup or in a `skip` expression, is recorded as an error on the test
+item itself instead of aborting the entire test run.
+"""
+function run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
+    # A literal `skip=true` is honored without creating a module or evaluating
+    # any test setups
+    if testitem.skip === true
+        Test.record(ts, Test.Broken(:skipped, Symbol(testitem.name)))
+        return
+    end
+
+    try
+        mod = Core.eval(Main, :(module $(gensym()) end))
+
+        # A `skip` expression is evaluated in the module the test item would run
+        # in, but before anything is imported into it, so that checks like
+        # `Sys.iswindows()` see the process the tests actually run in
+        if testitem.skip !== false && evaluate_skip(mod, testitem.filename, testitem.skip)
+            Test.record(ts, Test.Broken(:skipped, Symbol(testitem.name)))
+            return
+        end
+
+        ensure_setups_evaled(testitem, test_setup_module_set, testsetups)
+
+        run_testitem(mod, testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+    catch err
+        err isa InterruptException && rethrow()
+        Test.record(ts, Test.Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
+    end
+
+    return
+end
+
+# The `skip` keyword argument of a test item is reported by TestItemDetection
+# either as a `Bool`, when it was a literal, or as the source range of an
+# expression that has to be evaluated in the test process just before the test
+# item would run. We resolve that range to the source text plus the position it
+# was written at here, while we still have the content of the file at hand.
+function skip_details(content, option_skip)
+    option_skip isa Bool && return option_skip
+
+    return (code=content[option_skip], compute_line_column(content, first(option_skip))...)
+end
+
+# Directory names that are never worth descending into.
+const SKIPPED_DIRNAMES = Set([".git", ".svn", ".hg", "node_modules"])
+
+"""
+    find_test_files(path)
+
+Find all the Julia files in `path` and its subfolders that are searched for test
+items.
+
+Version control and dependency folders are never descended into, and any
+`JuliaTestItems.toml` file that is found scopes which of the remaining files are
+searched, see [`testitems_selected`](@ref).
+"""
+function find_test_files(path)
+    path = abspath(path)
+
+    julia_files = String[]
+    config_files = String[]
+
+    # An explicit walk instead of `walkdir`, because it is hard to stop that from
+    # recursing into the directories we want to skip
+    remaining_dirs = [path]
+    while !isempty(remaining_dirs)
+        dir = popfirst!(remaining_dirs)
+
+        entries = try
+            readdir(dir)
+        catch
+            continue
+        end
+
+        for entry in entries
+            filepath = joinpath(dir, entry)
+
+            descend = try
+                !islink(filepath) && isdir(filepath)
+            catch
+                # Foreign or broken reparse points (for example WSL created
+                # symlinks) make `lstat` throw on Julia 1.11 and later, so we
+                # skip any entry we cannot stat
+                continue
+            end
+
+            if descend
+                if !(entry in SKIPPED_DIRNAMES)
+                    push!(remaining_dirs, filepath)
+                end
+            elseif is_testitems_config_file(entry)
+                push!(config_files, normpath(filepath))
+            else
+                _, ext = splitext(entry)
+                if isvalid(ext) && lowercase(ext) == ".jl"
+                    push!(julia_files, normpath(filepath))
+                end
+            end
+        end
+    end
+
+    isempty(config_files) && return julia_files
+
+    configs = Dict{String,PathFilter}(i => parse_testitems_config(i) for i in config_files)
+
+    return Base.filter(i -> testitems_selected(configs, i), julia_files)
+end
+
+"""
     run_tests(path; filter=nothing, verbose=false)
 
 Run all test items in a directory and its subdirectories.
@@ -146,17 +303,7 @@ function run_tests(path; filter=nothing, verbose=false)
         end
     end
 
-    # Find all Julia files in this folder and sub folders
-    julia_files = String[]
-    for (root, _, files) in walkdir(path)
-        for file in files
-            _, ext = splitext(file)
-            if isvalid(ext) && lowercase(ext) == ".jl"
-                push!(julia_files, normpath(joinpath(root, file)))
-            end
-        end
-
-    end
+    julia_files = find_test_files(path)
 
     # Find all @testitems and @testsetup
     testitems = Dict{String,Vector}()
@@ -180,7 +327,7 @@ function run_tests(path; filter=nothing, verbose=false)
         end
 
         if length(testitems_for_file) > 0
-            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, option_setup=i.option_setup, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
+            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, option_setup=i.option_setup, skip=skip_details(content, i.option_skip), compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
         end
         for i in testsetups_for_file
             testsetups[i.name] = (filename=file, code=content[i.code_range], name=Symbol(i.name), kind=i.kind, compute_line_column(content, i.code_range.start)...)
@@ -206,32 +353,10 @@ function run_tests(path; filter=nothing, verbose=false)
                 Test.push_testset(testset(relpath(file, path); verbose=verbose))
                 try
                     for testitem in testitems
-                        snippets_to_run = []
-                        if !isempty(testitem.option_setup)
-                            for setup in testitem.option_setup
-                                key = setup
-                                if haskey(testsetups, key)
-                                    testsetup = testsetups[key]
-                                    if testsetup.kind==:module
-                                        working_dir = dirname(file)
-                                        ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
-                                    elseif testsetup.kind==:snippet
-                                        push!(snippets_to_run, testsetup)
-                                    else
-                                        error("Unknown setup type")
-                                    end
-                                else
-                                    error("Test setup $(setup) is not defined.")
-                                end
-                            end
-                        end
                         Test.push_testset(testset(testitem.name; verbose=verbose))
                         ts = Test.get_testset()
                         try
-                            run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
-                        catch err
-                            err isa InterruptException && rethrow()
-                            Test.record(ts, Test.Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
+                            run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
                         finally
                             Test.finish(Test.pop_testset())
                         end
@@ -252,33 +377,9 @@ function run_tests(path; filter=nothing, verbose=false)
                 ts_2 = testset(relpath(file, path); verbose=verbose)
                 Test.@with_testset ts_2 begin
                     for testitem in testitems
-                        snippets_to_run = []
-                        if !isempty(testitem.option_setup)
-                            for setup in testitem.option_setup
-                                key = setup
-                                if haskey(testsetups, key)
-                                    testsetup = testsetups[key]
-                                    if testsetup.kind==:module
-                                        working_dir = dirname(file)
-                                        ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
-                                    elseif testsetup.kind==:snippet
-                                        push!(snippets_to_run, testsetup)
-                                    else
-                                        error("Unknown setup type")
-                                    end
-                                else
-                                    error("Test setup $(setup) is not defined.")
-                                end
-                            end
-                        end
                         ts_3 = testset(testitem.name; verbose=verbose)
                         Test.@with_testset ts_3 begin
-                            try
-                                run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
-                            catch err
-                                err isa InterruptException && rethrow()
-                                Test.record(ts_3, Test.Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
-                            end
+                            run_testitem_in_testset(ts_3, testitem, package_name, test_setup_module_set, testsetups)
                         end
                         Test.finish(ts_3)
                     end
