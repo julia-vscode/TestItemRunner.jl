@@ -1,0 +1,5 @@
+[deps]
+GitHub = "bc5e4493-9b4d-5f90-b8aa-2b2bcaad7a26"
+LibGit2 = "76f85450-5226-5b5a-8eaa-529ad045b433"
+Query = "1a8c2f83-1ff3-5112-b086-8aa67b057ba1"
+TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
