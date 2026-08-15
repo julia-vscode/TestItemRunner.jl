@@ -196,7 +196,7 @@ function run_testitem_in_testset(ts, testitem, package_name, test_setup_module_s
         run_testitem(mod, testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
     catch err
         err isa InterruptException && rethrow()
-        Test.record(ts, Test.Error(:nontest_error, Expr(:tuple), err, Base.current_exceptions(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
+        Test.record(ts, Test.Error(:nontest_error, Expr(:tuple), err, current_exception_stack(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
     end
 
     return
@@ -430,6 +430,36 @@ end
     testset(a...; verbose=false, kw...) = Test.DefaultTestSet(a...; kw...)
 else
     testset(a...; kw...) = Test.DefaultTestSet(a...; kw...)
+end
+
+# `Test.Error` formats the value we pass it with whatever the running Julia
+# version knows how to print: a plain backtrace before v1.2, an exception stack
+# from v1.2 on, which was then renamed from `catch_stack` to `current_exceptions`
+# in v1.7. Note that those two boundaries are not the same version, so this
+# cannot be a two way shim. Each branch passes what that version's own Test
+# stdlib passes when it records an error.
+@static if VERSION ≥ v"1.7"
+    current_exception_stack() = Base.current_exceptions()
+elseif VERSION ≥ v"1.2"
+    current_exception_stack() = Base.catch_stack()
+else
+    current_exception_stack() = catch_backtrace()
+end
+
+@testitem "current_exception_stack" begin
+    using TestItemRunner: current_exception_stack
+
+    stack = try
+        error("boom")
+    catch
+        current_exception_stack()
+    end
+
+    # Test.Error formats the stack when it is constructed, so building one is
+    # what actually shows that we handed it the shape this Julia version wants
+    err = Test.Error(:nontest_error, Expr(:tuple), ErrorException("boom"), stack, LineNumberNode(1, Symbol(@__FILE__)))
+
+    @test err isa Test.Error
 end
 
 end
