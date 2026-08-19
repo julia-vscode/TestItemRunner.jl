@@ -1,5 +1,0 @@
-# This folder is a fixture for the `failfast` tests, and one of its test items
-# fails on purpose. The config file exists so that the `testdata/**` exclusion
-# in the repository root config does not reach into the fixture when
-# `find_test_files` is pointed straight at this folder.
-config-version = 1

@@ -1,5 +1,3 @@
 # The `packages` folder holds vendored copies of upstream repositories. Their
 # test items are not ours to run, so we don't search them for test items.
-# The `testdata` folder holds fixtures for our own tests, some of which fail
-# on purpose, so they are not part of this package's test suite either.
-exclude = ["packages/**", "testdata/**"]
+exclude = ["packages/**"]
