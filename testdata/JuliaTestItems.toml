@@ -1,0 +1,11 @@
+# `testdata` holds fixtures that the tests point `run_tests` and `find_test_files`
+# at directly. They are not part of this package's own test suite, and one of them
+# only makes sense as the second half of a pair, so nothing here is searched when
+# the search starts at the repository root.
+#
+# A walk that starts *inside* a fixture folder never sees this file, which is what
+# lets the fixtures still be run on purpose. The folders that carry a config of
+# their own are unaffected either way: the nearest config replaces the one above it
+# wholesale.
+config-version = 1
+exclude = ["**"]
