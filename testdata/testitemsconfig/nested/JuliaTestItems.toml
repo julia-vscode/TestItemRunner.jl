@@ -1,3 +1,5 @@
-# This file replaces the one in the parent folder for everything below this
-# folder, rather than adding to it, so the `excluded` folder next to it is
-# searched for test items.
+# This file governs the settings of everything below this folder, but scope is
+# the intersection with every config file above it. So `nested/excluded` IS
+# searched — the parent's `excluded/**` is anchored to the parent folder and
+# never reached it — while `nested/vetoed` is NOT, because the parent excludes
+# it by name and a nested config can only narrow scope, never widen it.

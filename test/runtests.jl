@@ -50,10 +50,18 @@ end
     # Folders like node_modules are never descended into
     @test !("node_modules/ignored.jl" in files)
 
-    # The nearest JuliaTestItems.toml replaces the one above it wholesale, so
-    # the `excluded/**` exclusion does not apply below `nested`
+    # A nested JuliaTestItems.toml governs the settings below it, and its
+    # folder is still searched
     @test "nested/nested_included.jl" in files
+
+    # The root's `excluded/**` is anchored to the root of the fixture, so it
+    # matches `excluded/` there but not `nested/excluded/` further down
     @test "nested/excluded/nested_excluded.jl" in files
+
+    # But what the root DOES exclude stays excluded: scope is the intersection
+    # over every enclosing config file, so the JuliaTestItems.toml in `nested`
+    # cannot bring `nested/vetoed` back
+    @test !("nested/vetoed/vetoed.jl" in files)
 
     @test length(files) == 3
 end
