@@ -202,6 +202,65 @@ function run_testitem_in_testset(ts, testitem, package_name, test_setup_module_s
     return
 end
 
+"""
+    has_failure(ts)
+
+Whether the test set `ts` recorded a failure or an error, either directly or in
+a test set nested inside it.
+
+This is what `failfast` looks at after each test item. It walks `results` rather
+than asking `Test` for the counts, because the shape of the counts that
+`Test.get_test_counts` returns changed between Julia versions, while `results`
+did not.
+"""
+function has_failure(ts)
+    :results in fieldnames(typeof(ts)) || return false
+
+    for r in ts.results
+        if r isa Test.Fail || r isa Test.Error
+            return true
+        elseif !(r isa Test.Result) && has_failure(r)
+            # Anything recorded that is not a `Test.Result` is a nested test set
+            return true
+        end
+    end
+
+    return false
+end
+
+@testitem "has_failure" begin
+    using TestItemRunner: has_failure
+
+    # The results are pushed rather than recorded, because `Test.record` prints
+    # a failure the moment it sees one, and these are not real failures
+    passed = Test.DefaultTestSet("passed")
+    push!(passed.results, Test.Pass(:test, nothing, nothing, true))
+    @test !has_failure(passed)
+
+    # A `Broken` result is what a skipped test item records, and it must not
+    # count as a failure
+    broken = Test.DefaultTestSet("broken")
+    push!(broken.results, Test.Broken(:skipped, :something))
+    @test !has_failure(broken)
+
+    errored = Test.DefaultTestSet("errored")
+    stack = try
+        error("boom")
+    catch
+        TestItemRunner.current_exception_stack()
+    end
+    push!(errored.results, Test.Error(:nontest_error, Expr(:tuple), ErrorException("boom"), stack, LineNumberNode(1, Symbol(@__FILE__))))
+    @test has_failure(errored)
+
+    # A failure nested one test set deep is still a failure
+    outer = Test.DefaultTestSet("outer")
+    push!(outer.results, errored)
+    @test has_failure(outer)
+
+    # Something without a `results` field is not a test set we can inspect
+    @test !has_failure(nothing)
+end
+
 # The `skip` keyword argument of a test item is reported by TestItemDetection
 # either as a `Bool`, when it was a literal, or as the source range of an
 # expression that has to be evaluated in the test process just before the test
@@ -287,8 +346,11 @@ Run all test items in a directory and its subdirectories.
 - `path`: The path to the directory containing the tests.
 - `filter`: A filter function to apply to the test items.
 - `verbose`: Whether to run the tests in verbose mode.
+- `failfast`: Whether to stop the test run after the first test item that fails
+  or errors. The remaining test items are then not run at all, so they show up
+  in neither the summary nor the counts.
 """
-function run_tests(path; filter=nothing, verbose=false)
+function run_tests(path; filter=nothing, verbose=false, failfast=false)
     path = abspath(path)
 
     # Find package name
@@ -346,6 +408,11 @@ function run_tests(path; filter=nothing, verbose=false)
     test_setup_module = Core.eval(Main, :(module $(gensym()) end))
     test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}())
 
+    # Set once `failfast` has seen a test item fail, to unwind out of both loops
+    # while still finishing every test set that is already open, so that the
+    # summary of the partial run still prints.
+    stop = false
+
     @static if VERSION ≤ v"1.13-"
         Test.push_testset(testset("Package"; verbose=verbose))
         try
@@ -360,10 +427,17 @@ function run_tests(path; filter=nothing, verbose=false)
                         finally
                             Test.finish(Test.pop_testset())
                         end
+
+                        if failfast && has_failure(ts)
+                            stop = true
+                            break
+                        end
                     end
                 finally
                     Test.finish(Test.pop_testset())
                 end
+
+                stop && break
             end
         finally
             ts = Test.pop_testset()
@@ -382,9 +456,16 @@ function run_tests(path; filter=nothing, verbose=false)
                             run_testitem_in_testset(ts_3, testitem, package_name, test_setup_module_set, testsetups)
                         end
                         Test.finish(ts_3)
+
+                        if failfast && has_failure(ts_3)
+                            stop = true
+                            break
+                        end
                     end
                 end
                 Test.finish(ts_2)
+
+                stop && break
             end
         end
         # Outer testset generates report that needs to integrate results from nested (custom) testsets
@@ -399,7 +480,7 @@ Run all test items in a package, using optional filter and verbosity arguments.
 
 # Usage
 ```julia
-@run_package_tests filter=<filter_function>, verbose=<bool>
+@run_package_tests filter=<filter_function>, verbose=<bool>, failfast=<bool>
 ```
 
 ```julia
@@ -409,12 +490,14 @@ Run all test items in a package, using optional filter and verbosity arguments.
 # Arguments
 - `filter`: An optional filter function to apply to the test items.
 - `verbose`: An optional argument to specify verbosity.
+- `failfast`: An optional argument to stop the run after the first test item
+  that fails or errors.
 """
 macro run_package_tests(ex...)
     kwargs = []
 
     for i in ex
-        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose)
+        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose, :failfast)
             push!(kwargs, esc(i))
         else
             error("Invalid argument")

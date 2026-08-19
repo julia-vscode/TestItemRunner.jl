@@ -36,6 +36,49 @@ end
     @test false
 end
 
+@testsnippet FailfastFixture begin
+    # `run_tests` finishes a root test set, which throws when anything failed,
+    # and which would otherwise be recorded into the test set of the test item
+    # that is running it. The test set stack lives in task local storage and is
+    # not inherited, so running the fixture on a fresh task gives it a stack of
+    # its own and keeps its deliberate failure out of our own results.
+    function run_failfast_fixture(; failfast)
+        log = tempname()
+        touch(log)
+
+        path = joinpath(@__DIR__, "..", "testdata", "failfast")
+
+        # The fixture fails on purpose, so its summary and its failure report are
+        # silenced rather than printed into the middle of our own results
+        printing = Test.TESTSET_PRINT_ENABLE[]
+        Test.TESTSET_PRINT_ENABLE[] = false
+
+        try
+            withenv("TESTITEMRUNNER_FAILFAST_LOG" => log) do
+                task = @async try
+                    TestItemRunner.run_tests(path; failfast=failfast)
+                catch err
+                    err
+                end
+                wait(task)
+            end
+
+            return [strip(i) for i in eachline(log) if !isempty(strip(i))]
+        finally
+            Test.TESTSET_PRINT_ENABLE[] = printing
+            rm(log, force=true)
+        end
+    end
+end
+
+@testitem "failfast stops after the first failing test item" setup=[FailfastFixture] begin
+    @test run_failfast_fixture(failfast=true) == ["first", "second"]
+end
+
+@testitem "without failfast every test item runs" setup=[FailfastFixture] begin
+    @test run_failfast_fixture(failfast=false) == ["first", "second", "third"]
+end
+
 @testitem "find_test_files" begin
     using TestItemRunner: find_test_files
 
