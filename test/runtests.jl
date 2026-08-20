@@ -175,6 +175,55 @@ end
     @test descriptions(subsets(ts)[3]) == ["tree top"]
 end
 
+@testitem "custom testset" begin
+    # A test set that only collects what it is given. Not recording itself into its
+    # parent when it finishes is what keeps the deliberate failure of the fixture
+    # out of our own results, and it is also why `run_tests` does not throw here.
+    mutable struct CollectingTestSet <: Test.AbstractTestSet
+        description::String
+        verbose::Bool
+        results::Vector{Any}
+    end
+
+    CollectingTestSet(description; verbose=false) = CollectingTestSet(description, verbose, [])
+
+    const collected = CollectingTestSet[]
+
+    Test.record(ts::CollectingTestSet, result) = (push!(ts.results, result); result)
+    Test.finish(ts::CollectingTestSet) = (push!(collected, ts); ts)
+
+    path = joinpath(@__DIR__, "..", "testdata", "customtestset")
+
+    # The test set stack lives in task local storage and is not inherited, so a
+    # fresh task gives the fixture a stack of its own
+    task = @async TestItemRunner.run_tests(path; testset=CollectingTestSet, verbose=true)
+    wait(task)
+
+    # All three levels of test sets, the package, the file and each test item, are
+    # created from the custom test set. The package is the last one to finish.
+    @test length(collected) == 6
+    @test collected[end].description == "Package"
+    @test collected[end].verbose
+    @test any(i -> i.description == "tests.jl", collected)
+
+    by_name = Dict(i.description => i for i in collected)
+
+    @test length(by_name["passing"].results) == 1
+    @test by_name["passing"].results[1] isa Test.Pass
+
+    @test length(by_name["failing"].results) == 1
+    @test by_name["failing"].results[1] isa Test.Fail
+
+    # A skipped test item is recorded as broken on the test set of the test item
+    @test length(by_name["skipped"].results) == 1
+    @test by_name["skipped"].results[1] isa Test.Broken
+
+    # Anything that goes wrong while preparing a test item is recorded as an error
+    # on the test set of the test item
+    @test length(by_name["broken setup"].results) == 1
+    @test by_name["broken setup"].results[1] isa Test.Error
+end
+
 @testitem "find_test_files" begin
     using TestItemRunner: find_test_files
 
