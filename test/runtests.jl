@@ -104,6 +104,77 @@ end
     @test run_failfast_fixture(failfast=false) == ["first", "second", "third"]
 end
 
+@testsnippet TreeFixture begin
+    # The folder layout is the whole point of this fixture, so it is written out
+    # rather than kept in `testdata`: a temporary folder has no `JuliaTestItems.toml`
+    # anywhere above it, so what the walk finds depends on nothing but the layout.
+    # `a` holds a file and a subfolder, while `c` and `a/b` hold a single file
+    # each, which is what a folded node is made of.
+    function write_tree_fixture(dir)
+        for (path, name) in [
+            (joinpath("a", "x.jl"), "tree x"),
+            (joinpath("a", "b", "y.jl"), "tree y"),
+            (joinpath("c", "z.jl"), "tree z"),
+            ("top.jl", "tree top"),
+        ]
+            file = joinpath(dir, path)
+            mkpath(dirname(file))
+            write(file, "@testitem \"$name\" begin\n    @test true\nend\n")
+        end
+    end
+
+    # `run_tests` finishes a root test set, which would otherwise be recorded
+    # into the test set of the test item that is running it. The test set stack
+    # lives in task local storage and is not inherited, so running the fixture
+    # on a fresh task gives it a stack of its own.
+    function run_tree_fixture()
+        dir = mktempdir()
+        sink = tempname()
+
+        try
+            write_tree_fixture(dir)
+
+            # The fixture's own summary is not worth printing into the middle of
+            # our results. Redirecting is what works on every version we support:
+            # `Test.TESTSET_PRINT_ENABLE` became a scoped value in Julia 1.13 and
+            # can no longer be assigned to.
+            return open(sink, "w") do io
+                redirect_stdout(io) do
+                    fetch(@async TestItemRunner.run_tests(dir))
+                end
+            end
+        finally
+            rm(dir, recursive=true, force=true)
+            rm(sink, force=true)
+        end
+    end
+
+    subsets(ts) = [i for i in ts.results if i isa Test.DefaultTestSet]
+    descriptions(ts) = [i.description for i in subsets(ts)]
+end
+
+@testitem "the summary mirrors the folder structure" setup=[TreeFixture] begin
+    ts = run_tree_fixture()
+
+    # The fixture has no Project.toml, so the root falls back to "Package"
+    @test ts.description == "Package"
+
+    # Folders come first, then files, each group alphabetical. `c` and `a/b`
+    # hold a single file each and are folded into one node, with a forward slash
+    # on every platform.
+    @test descriptions(ts) == ["a", "c/z.jl", "top.jl"]
+
+    # `a` holds both a subfolder and a file, so it is not folded
+    a = subsets(ts)[1]
+    @test descriptions(a) == ["b/y.jl", "x.jl"]
+
+    # And the test items themselves sit below the file they are written in
+    @test descriptions(subsets(a)[1]) == ["tree y"]
+    @test descriptions(subsets(a)[2]) == ["tree x"]
+    @test descriptions(subsets(ts)[2]) == ["tree z"]
+    @test descriptions(subsets(ts)[3]) == ["tree top"]
+end
+
 @testitem "find_test_files" begin
     using TestItemRunner: find_test_files
 
