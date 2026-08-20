@@ -181,6 +181,19 @@ end
     @test !("nested/vetoed/vetoed.jl" in files)
 
     @test length(files) == 3
+
+    # The search is scoped by the folder it starts in: config files above that
+    # folder are not consulted, so starting inside `nested` no longer sees the
+    # `nested/vetoed/**` exclusion of the config one level up. This is also what
+    # keeps `testdata/JuliaTestItems.toml`, which excludes everything, from
+    # hiding the fixtures the tests point at directly.
+    nested = joinpath(path, "nested")
+    nested_files = [replace(relpath(i, nested), '\\' => '/') for i in find_test_files(nested)]
+
+    @test "vetoed/vetoed.jl" in nested_files
+    @test "nested_included.jl" in nested_files
+    @test "excluded/nested_excluded.jl" in nested_files
+    @test length(nested_files) == 3
 end
 
 dir = pwd()
