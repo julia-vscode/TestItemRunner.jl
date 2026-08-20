@@ -1,0 +1,3 @@
+# The `packages` folder holds vendored copies of upstream repositories. Their
+# test items are not ours to run, so we don't search them for test items.
+exclude = ["packages/**"]
