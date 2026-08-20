@@ -1,2 +1,5 @@
 config-version = 1
-exclude = ["excluded/**"]
+# Both patterns are anchored to this folder, the one holding the config file.
+# `nested/vetoed/**` reaches into a folder that has its own JuliaTestItems.toml
+# above it, and stays excluded regardless.
+exclude = ["excluded/**", "nested/vetoed/**"]

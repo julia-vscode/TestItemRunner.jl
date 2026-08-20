@@ -9,7 +9,13 @@
 #
 # Keeping the semantics identical to JuliaWorkspaces matters, because the same
 # config file decides which test items VS Code shows and which test items
-# `@run_package_tests` runs.
+# `@run_package_tests` runs. In particular, scope is the intersection over the
+# whole chain of enclosing config files: a nested `JuliaTestItems.toml` may
+# narrow discovery further, but it can never resurrect a subtree an enclosing
+# config excluded. `find_test_files` therefore also collects config files in the
+# directories *above* the tree it is asked to search, so that running the tests
+# of a vendored subpackage directly sees the same exclusions the language server
+# does.
 
 # ── Glob matching ───────────────────────────────────────────────────────────
 
@@ -173,27 +179,35 @@ function is_testitems_config_file(path)
 end
 
 """
-    nearest_config(config_paths, path) -> Union{String,Nothing}
+    ancestor_configs(config_paths, path) -> Vector{String}
 
-The config file governing `path`: the one in the deepest directory that is a
-prefix of `path`'s directory. Only that single file applies — a nested config
-file replaces the one above it rather than adding to it.
+Every config file whose directory is a prefix of `path`, outermost first. Scope
+is the intersection over this whole chain, see [`testitems_selected`](@ref).
 """
-function nearest_config(config_paths, path::AbstractString)
+function ancestor_configs(config_paths, path::AbstractString)
     target = replace(String(path), '\\' => '/')
 
-    best = nothing
-    best_len = -1
+    res = Tuple{Int,String}[]
     for config_path in config_paths
         dir = _normalize_dir(dirname(config_path))
         _path_startswith(target, dir) || continue
-        if length(dir) > best_len
-            best = config_path
-            best_len = length(dir)
-        end
+        push!(res, (length(dir), config_path))
     end
+    sort!(res)
 
-    return best
+    return String[x[2] for x in res]
+end
+
+"""
+    nearest_config(config_paths, path) -> Union{String,Nothing}
+
+The innermost config file enclosing `path`, or `nothing` when there is none.
+Scope does not come from this one file alone — see [`ancestor_configs`](@ref).
+"""
+function nearest_config(config_paths, path::AbstractString)
+    chain = ancestor_configs(config_paths, path)
+
+    return isempty(chain) ? nothing : last(chain)
 end
 
 # ── Parsing ─────────────────────────────────────────────────────────────────
@@ -249,20 +263,22 @@ end
 """
     testitems_selected(configs, path) -> Bool
 
-Whether `path` is searched for test items, according to the `JuliaTestItems.toml`
-governing it. `configs` maps the path of each config file that was found to its
-parsed [`PathFilter`](@ref). A file with no governing config file is selected.
+Whether `path` is searched for test items. Every `JuliaTestItems.toml` enclosing
+`path` must admit it, each evaluated relative to its own directory, so a nested
+config can narrow discovery further but never widen it. `configs` maps the path
+of each config file that was found to its parsed [`PathFilter`](@ref). A file
+with no enclosing config file is selected.
 """
 function testitems_selected(configs, path::AbstractString)
     isempty(configs) && return true
 
-    config_path = nearest_config(keys(configs), path)
-    config_path === nothing && return true
+    for config_path in ancestor_configs(keys(configs), path)
+        relative_path = config_relative_path(dirname(config_path), path)
+        relative_path === nothing && continue
+        path_selected(configs[config_path], relative_path) || return false
+    end
 
-    relative_path = config_relative_path(dirname(config_path), path)
-    relative_path === nothing && return true
-
-    return path_selected(configs[config_path], relative_path)
+    return true
 end
 
 @testitem "glob patterns" begin
@@ -328,18 +344,27 @@ end
     @test !path_selected(both, "test/manual/foo.jl")
 end
 
-@testitem "nearest_config" begin
-    using TestItemRunner: nearest_config, config_relative_path
+@testitem "ancestor_configs" begin
+    using TestItemRunner: ancestor_configs, nearest_config, config_relative_path
 
     configs = ["/a/JuliaTestItems.toml", "/a/b/c/JuliaTestItems.toml"]
 
-    # The deepest enclosing config file wins.
-    @test nearest_config(configs, "/a/foo.jl") == "/a/JuliaTestItems.toml"
-    @test nearest_config(configs, "/a/b/foo.jl") == "/a/JuliaTestItems.toml"
-    @test nearest_config(configs, "/a/b/c/foo.jl") == "/a/b/c/JuliaTestItems.toml"
-    @test nearest_config(configs, "/a/b/c/d/foo.jl") == "/a/b/c/JuliaTestItems.toml"
+    # Every enclosing config file, outermost first.
+    @test ancestor_configs(configs, "/a/foo.jl") == ["/a/JuliaTestItems.toml"]
+    @test ancestor_configs(configs, "/a/b/foo.jl") == ["/a/JuliaTestItems.toml"]
+    @test ancestor_configs(configs, "/a/b/c/foo.jl") == configs
+    @test ancestor_configs(configs, "/a/b/c/d/foo.jl") == configs
+
+    # The order of the input does not change the result.
+    @test ancestor_configs(reverse(configs), "/a/b/c/foo.jl") == configs
 
     # A file outside of every config file's directory has no config.
+    @test isempty(ancestor_configs(configs, "/z/foo.jl"))
+    @test isempty(ancestor_configs(String[], "/a/foo.jl"))
+
+    # `nearest_config` is the innermost entry of the same chain.
+    @test nearest_config(configs, "/a/b/foo.jl") == "/a/JuliaTestItems.toml"
+    @test nearest_config(configs, "/a/b/c/d/foo.jl") == "/a/b/c/JuliaTestItems.toml"
     @test nearest_config(configs, "/z/foo.jl") === nothing
     @test nearest_config(String[], "/a/foo.jl") === nothing
 
@@ -355,17 +380,36 @@ end
     # A file with no config file anywhere above it is selected.
     @test testitems_selected(Dict{String,PathFilter}(), "/a/foo.jl")
 
+    # Note the exclusion is written relative to `/a`, the directory of the
+    # config file that carries it: a pattern containing a separator is anchored
+    # there, so `gen/**` alone would not reach `/a/b/gen`.
     configs = Dict(
-        "/a/JuliaTestItems.toml" => PathFilter(GlobPattern[], [GlobPattern("gen/**")]),
+        "/a/JuliaTestItems.toml" => PathFilter(GlobPattern[], [GlobPattern("b/gen/**")]),
         "/a/b/JuliaTestItems.toml" => PathFilter(GlobPattern[], GlobPattern[])
     )
 
     @test testitems_selected(configs, "/a/foo.jl")
-    @test !testitems_selected(configs, "/a/gen/foo.jl")
+    @test testitems_selected(configs, "/a/b/foo.jl")
 
-    # The nearest config replaces the one above it wholesale, so the `gen`
-    # exclusion of `/a` does not apply below `/a/b`.
-    @test testitems_selected(configs, "/a/b/gen/foo.jl")
+    # An enclosing config's exclusion holds even where a nested config takes
+    # over: a nested file can narrow discovery, never widen it.
+    @test !testitems_selected(configs, "/a/b/gen/foo.jl")
+
+    # A nested config may still narrow further.
+    narrowing = Dict(
+        "/a/JuliaTestItems.toml" => PathFilter(GlobPattern[], GlobPattern[]),
+        "/a/b/JuliaTestItems.toml" => PathFilter(GlobPattern[], [GlobPattern("gen/**")])
+    )
+    @test testitems_selected(narrowing, "/a/b/src/foo.jl")
+    @test !testitems_selected(narrowing, "/a/b/gen/foo.jl")
+
+    # A nested `include` cannot widen the enclosing one.
+    widening = Dict(
+        "/a/JuliaTestItems.toml" => PathFilter([GlobPattern("b/src/**")], GlobPattern[]),
+        "/a/b/JuliaTestItems.toml" => PathFilter([GlobPattern("**")], GlobPattern[])
+    )
+    @test testitems_selected(widening, "/a/b/src/foo.jl")
+    @test !testitems_selected(widening, "/a/b/docs/foo.jl")
 
     @test testitems_selected(configs, "/z/foo.jl")
 end

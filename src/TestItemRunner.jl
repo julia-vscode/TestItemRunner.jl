@@ -283,7 +283,9 @@ items.
 
 Version control and dependency folders are never descended into, and any
 `JuliaTestItems.toml` file that is found scopes which of the remaining files are
-searched, see [`testitems_selected`](@ref).
+searched, see [`testitems_selected`](@ref). Config files in the directories
+*above* `path` count too, so that searching a subdirectory directly honours the
+same exclusions as searching the whole project.
 """
 function find_test_files(path)
     path = abspath(path)
@@ -330,11 +332,35 @@ function find_test_files(path)
         end
     end
 
+    # Scope is the intersection over every enclosing config file, so the ones
+    # above `path` matter as much as the ones inside it — otherwise running the
+    # tests of a vendored subpackage directly would see a different set of test
+    # items than the language server shows for the whole project.
+    append!(config_files, _enclosing_config_files(path))
+
     isempty(config_files) && return julia_files
 
     configs = Dict{String,PathFilter}(i => parse_testitems_config(i) for i in config_files)
 
     return Base.filter(i -> testitems_selected(configs, i), julia_files)
+end
+
+# Every `JuliaTestItems.toml` in a strict ancestor directory of `dir`, walking up
+# to the filesystem root.
+function _enclosing_config_files(dir)
+    res = String[]
+
+    current = dirname(dir)
+    while true
+        candidate = joinpath(current, "JuliaTestItems.toml")
+        isfile(candidate) && push!(res, normpath(candidate))
+
+        parent = dirname(current)
+        parent == current && break
+        current = parent
+    end
+
+    return res
 end
 
 """
