@@ -124,6 +124,67 @@ function ensure_setups_evaled(testitem, test_setup_module_set, testsetups)
     end
 end
 
+"""
+    release_module_globals!(mod)
+
+Point every global in `mod` at `nothing`, so that whatever the test item bound to one
+becomes collectable.
+
+Every test item runs in a module of its own, and Julia cannot unload a module: the module
+stays reachable for the life of the process, and so does everything its globals point at.
+A test item that binds a large array therefore keeps that array alive for the rest of the
+run, which is what #65 reports. The module object itself still leaks — nothing can be done
+about that — but its contents do not have to.
+
+Left alone: `eval`, `include` and the module's own name, which the `module` expression
+created rather than the test item, and submodules, because a `@testmodule` reached through
+one is shared with other test items. Bindings that cannot take `nothing` — a `const` on
+Julia before 1.12, a typed global, a name brought in by `using` — are skipped as they come
+up, because there is nothing else to try for them.
+"""
+function release_module_globals!(mod::Module)
+    for name in names(mod; all=true)
+        (name === :eval || name === :include || name === nameof(mod)) && continue
+        # Names Julia generated itself, for closures, generators and macro hygiene
+        occursin('#', string(name)) && continue
+        isdefined(mod, name) || continue
+
+        try
+            getfield(mod, name) isa Module && continue
+            # `Core.eval` rather than `setglobal!`, which only exists from Julia 1.9 on
+            Core.eval(mod, Expr(:(=), name, nothing))
+        catch
+        end
+    end
+
+    return nothing
+end
+
+@testitem "release_module_globals!" begin
+    using TestItemRunner: release_module_globals!
+
+    mod = Core.eval(Main, :(module $(gensym()) end))
+    Base.include_string(mod, "kept = [1, 2, 3]\nconst pinned = 1\n")
+
+    weak = WeakRef(getfield(mod, :kept))
+    release_module_globals!(mod)
+
+    @test getfield(mod, :kept) === nothing
+
+    GC.gc(true)
+    GC.gc(true)
+    @test weak.value === nothing
+
+    # `eval` and `include` belong to the module rather than to the test item
+    @test getfield(mod, :eval) isa Function
+    @test getfield(mod, :include) isa Function
+
+    # A submodule is left alone: a `@testmodule` can be reached through one
+    inner = Core.eval(mod, :(module Inner end))
+    release_module_globals!(mod)
+    @test getfield(mod, :Inner) === inner
+end
+
 function run_testitem(mod, filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set, testsetups)
     working_dir = dirname(filepath)
 
@@ -180,6 +241,8 @@ function run_testitem_in_testset(ts, testitem, package_name, test_setup_module_s
         return
     end
 
+    mod = nothing
+
     try
         mod = Core.eval(Main, :(module $(gensym()) end))
 
@@ -197,6 +260,11 @@ function run_testitem_in_testset(ts, testitem, package_name, test_setup_module_s
     catch err
         err isa InterruptException && rethrow()
         Test.record(ts, Test.Error(:nontest_error, Expr(:tuple), err, current_exception_stack(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
+    finally
+        # `invokelatest` is load bearing: the test item's globals were created by an
+        # `include_string` in a newer world, and from this one `names(mod; all=true)`
+        # does not list them yet, so a direct call would find nothing to release.
+        mod === nothing || Base.invokelatest(release_module_globals!, mod)
     end
 
     return

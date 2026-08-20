@@ -36,6 +36,31 @@ end
     @test false
 end
 
+@testitem "a test item's globals are released once it has run" begin
+    # `run_tests` finishes a root test set, which would otherwise be recorded into the
+    # test set of the test item running it. The test set stack lives in task local
+    # storage and is not inherited, so a fresh task gives the fixture a stack of its own.
+    path = joinpath(@__DIR__, "..", "testdata", "memory")
+
+    printing = Test.TESTSET_PRINT_ENABLE[]
+    Test.TESTSET_PRINT_ENABLE[] = false
+    try
+        task = @async try
+            TestItemRunner.run_tests(path)
+        catch err
+            err
+        end
+        wait(task)
+    finally
+        Test.TESTSET_PRINT_ENABLE[] = printing
+    end
+
+    # The second fixture item is the assertion: it collects and then looks at what the
+    # weak reference the first one parked in `Main` still points at
+    @test isdefined(Main, :TESTITEMRUNNER_MEMORY_PROBE)
+    @test Main.TESTITEMRUNNER_MEMORY_PROBE.value === nothing
+end
+
 @testsnippet FailfastFixture begin
     # `run_tests` finishes a root test set, which throws when anything failed,
     # and which would otherwise be recorded into the test set of the test item
