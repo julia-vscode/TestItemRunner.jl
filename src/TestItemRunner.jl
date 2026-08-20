@@ -408,9 +408,320 @@ function find_test_files(path)
 end
 
 """
+    TestItemTree
+
+A node in the tree that the test summary is organized by.
+
+The tree mirrors the folder structure below the package root: every folder that
+contains test items becomes a node, and every file with test items becomes a
+leaf that carries them. `Test` renders whatever nesting of test sets it is
+handed, so building this tree is all it takes for the summary to show the folder
+structure.
+"""
+mutable struct TestItemTree
+    name::String
+    # Whether this node came from a folder rather than a file. Only used for
+    # ordering, and deliberately not touched by `collapse_tree!`, so that a
+    # collapsed `test/runtests.jl` still sorts where the `test` folder sat.
+    isdir::Bool
+    children::Vector{TestItemTree}
+    # Only ever non-empty on a leaf, and a leaf is always a file
+    testitems::Vector
+end
+
+TestItemTree(name, isdir) = TestItemTree(name, isdir, TestItemTree[], [])
+
+"""
+    path_components(path)
+
+Split a path into its individual components, outermost first.
+
+This is what `splitpath` does, which we cannot use because it was only added in
+Julia 1.1 while this package still supports Julia 1.0.
+"""
+function path_components(path)
+    components = String[]
+
+    while true
+        dir, name = splitdir(path)
+        isempty(name) || pushfirst!(components, name)
+        (isempty(dir) || dir == path) && break
+        path = dir
+    end
+
+    return components
+end
+
+@testitem "path_components" begin
+    using TestItemRunner: path_components
+
+    @test path_components("runtests.jl") == ["runtests.jl"]
+    @test path_components(joinpath("test", "runtests.jl")) == ["test", "runtests.jl"]
+    @test path_components(joinpath("a", "b", "c.jl")) == ["a", "b", "c.jl"]
+    @test path_components("") == String[]
+
+    # An absolute path has to terminate too, even though we only ever hand this
+    # relative paths
+    @test path_components(abspath(joinpath("a", "b.jl")))[end-1:end] == ["a", "b.jl"]
+end
+
+"""
+    build_tree(root_name, files)
+
+Build the tree of test items from `files`, a collection of `(path, testitems)`
+pairs whose paths are relative to the package root.
+"""
+function build_tree(root_name, files)
+    root = TestItemTree(root_name, true)
+
+    for (path, testitems) in files
+        components = path_components(path)
+        isempty(components) && continue
+
+        node = root
+
+        for i in 1:length(components)
+            component = components[i]
+            isdir = i < length(components)
+
+            child = nothing
+            for candidate in node.children
+                if candidate.name == component && candidate.isdir == isdir
+                    child = candidate
+                    break
+                end
+            end
+
+            if child === nothing
+                child = TestItemTree(component, isdir)
+                push!(node.children, child)
+            end
+
+            node = child
+        end
+
+        append!(node.testitems, testitems)
+    end
+
+    return root
+end
+
+@testitem "build_tree" begin
+    using TestItemRunner: build_tree
+
+    tree = build_tree("MyPkg", [(joinpath("test", "a", "x.jl"), [1]), (joinpath("test", "y.jl"), [2, 3])])
+
+    @test tree.name == "MyPkg"
+    @test [i.name for i in tree.children] == ["test"]
+
+    test_folder = tree.children[1]
+    @test test_folder.isdir
+    @test isempty(test_folder.testitems)
+
+    # Files in the same folder share their parent
+    @test sort([i.name for i in test_folder.children]) == ["a", "y.jl"]
+
+    y = test_folder.children[findfirst(i -> i.name == "y.jl", test_folder.children)]
+    @test !y.isdir
+    @test y.testitems == [2, 3]
+
+    a = test_folder.children[findfirst(i -> i.name == "a", test_folder.children)]
+    @test [i.name for i in a.children] == ["x.jl"]
+    @test a.children[1].testitems == [1]
+end
+
+"""
+    sort_tree!(node)
+
+Order the children of every node below `node`: folders first, then files, each
+group alphabetically. Without this the summary would follow the arbitrary order
+of the `Dict` the test items were collected in, which can differ between runs.
+"""
+function sort_tree!(node)
+    sort!(node.children, by=i -> (i.isdir ? 0 : 1, i.name))
+
+    for child in node.children
+        sort_tree!(child)
+    end
+
+    return node
+end
+
+@testitem "sort_tree!" begin
+    using TestItemRunner: build_tree, sort_tree!
+
+    tree = build_tree("MyPkg", [
+        (joinpath("src", "b.jl"), []),
+        ("z.jl", []),
+        ("a.jl", []),
+        (joinpath("test", "c.jl"), []),
+    ])
+    sort_tree!(tree)
+
+    # Folders come first, and each group is alphabetical
+    @test [i.name for i in tree.children] == ["src", "test", "a.jl", "z.jl"]
+end
+
+"""
+    collapse_tree!(root)
+
+Fold every chain of nodes below `root` that has a single child into one node, so
+that a `test` folder holding nothing but `runtests.jl` shows up as a single
+`test/runtests.jl` test set rather than as two nested ones.
+
+The root itself is never folded into its child, because it names the package.
+"""
+function collapse_tree!(root)
+    for child in root.children
+        collapse_node!(child)
+    end
+
+    return root
+end
+
+function collapse_node!(node)
+    for child in node.children
+        collapse_node!(child)
+    end
+
+    # The children have already been collapsed, so a single child cannot itself
+    # have a single child, and this folds a chain of any length in one pass
+    if length(node.children) == 1
+        child = node.children[1]
+
+        # Always a forward slash, so that the summary reads the same on Windows
+        # as it does everywhere else
+        node.name = string(node.name, '/', child.name)
+        node.children = child.children
+        node.testitems = child.testitems
+    end
+
+    return node
+end
+
+@testitem "collapse_tree!" begin
+    using TestItemRunner: build_tree, sort_tree!, collapse_tree!
+
+    # A folder with a single file folds into one node, a chain of them folds all
+    # the way down, and a folder with two children is left alone
+    tree = build_tree("MyPkg", [
+        (joinpath("test", "runtests.jl"), [1]),
+        (joinpath("a", "b", "c", "deep.jl"), [2]),
+        (joinpath("many", "one.jl"), []),
+        (joinpath("many", "two.jl"), []),
+    ])
+    sort_tree!(tree)
+    collapse_tree!(tree)
+
+    names = [i.name for i in tree.children]
+    @test "test/runtests.jl" in names
+    @test "a/b/c/deep.jl" in names
+    @test "many" in names
+
+    runtests = tree.children[findfirst(i -> i.name == "test/runtests.jl", tree.children)]
+    @test isempty(runtests.children)
+    @test runtests.testitems == [1]
+
+    many = tree.children[findfirst(i -> i.name == "many", tree.children)]
+    @test [i.name for i in many.children] == ["one.jl", "two.jl"]
+
+    # The root keeps its own name even when it has a single child
+    single = build_tree("MyPkg", [(joinpath("test", "runtests.jl"), [])])
+    collapse_tree!(single)
+    @test single.name == "MyPkg"
+    @test [i.name for i in single.children] == ["test/runtests.jl"]
+end
+
+# Running a test set and finishing it afterwards. Julia 1.13 replaced the
+# `push_testset`/`pop_testset` stack with `Test.@with_testset`, and the tree is
+# walked recursively, so that difference is shimmed here rather than duplicating
+# the whole walk once per version.
+@static if VERSION ≤ v"1.13-"
+    function with_testset(f, ts)
+        Test.push_testset(ts)
+
+        return try
+            f()
+        finally
+            Test.finish(Test.pop_testset())
+        end
+    end
+
+    function with_root_testset(f, ts)
+        Test.push_testset(ts)
+
+        return try
+            f()
+        finally
+            # Outer testset generates report that needs to integrate results from nested (custom) testsets
+            Base.invokelatest(Test.finish, Test.pop_testset())
+        end
+    end
+else
+    function with_testset(f, ts)
+        return try
+            Test.@with_testset ts begin
+                f()
+            end
+        finally
+            Test.finish(ts)
+        end
+    end
+
+    function with_root_testset(f, ts)
+        return try
+            Test.@with_testset ts begin
+                f()
+            end
+        finally
+            # Outer testset generates report that needs to integrate results from nested (custom) testsets
+            Base.invokelatest(Test.finish, ts)
+        end
+    end
+end
+
+"""
+    run_node!(node, package_name, test_setup_module_set, testsetups, verbose, failfast, testset)
+
+Run everything below `node`, creating one test set per node on the way down.
+
+Returns whether the run should stop, which is how `failfast` unwinds out of
+every level of the tree while still finishing the test sets that are already
+open, so that the summary of the partial run still prints.
+"""
+function run_node!(node, package_name, test_setup_module_set, testsetups, verbose, failfast, testset)
+    if isempty(node.children)
+        for testitem in node.testitems
+            ts = testset(testitem.name; verbose=verbose)
+
+            with_testset(ts) do
+                run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
+                false
+            end
+
+            failfast && has_failure(ts) && return true
+        end
+    else
+        for child in node.children
+            stop = with_testset(testset(child.name; verbose=verbose)) do
+                run_node!(child, package_name, test_setup_module_set, testsetups, verbose, failfast, testset)
+            end
+
+            stop && return true
+        end
+    end
+
+    return false
+end
+
+"""
     run_tests(path; filter=nothing, verbose=false, failfast=false, testset=default_testset)
 
 Run all test items in a directory and its subdirectories.
+
+The test items are organized into a tree of test sets that mirrors the folder
+structure below `path`, so that the summary shows where each test item lives.
+Returns the finished root test set.
 
 # Arguments
 - `path`: The path to the directory containing the tests.
@@ -492,73 +803,26 @@ function run_tests(path; filter=nothing, verbose=false, failfast=false, testset=
         end
     end
 
+    # Organize the test items into a tree that mirrors the folder structure, so
+    # that the summary shows where in the package each test item lives
+    root = build_tree(
+        isempty(package_name) ? "Package" : package_name,
+        [(relpath(file, path), items) for (file, items) in pairs(testitems)]
+    )
+    sort_tree!(root)
+    collapse_tree!(root)
+
     # Run testitems
     test_setup_module = Core.eval(Main, :(module $(gensym()) end))
     test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}())
 
-    # Set once `failfast` has seen a test item fail, to unwind out of both loops
-    # while still finishing every test set that is already open, so that the
-    # summary of the partial run still prints.
-    stop = false
+    root_ts = testset(root.name; verbose=verbose)
 
-    @static if VERSION ≤ v"1.13-"
-        Test.push_testset(testset("Package"; verbose=verbose))
-        try
-            for (file, testitems) in pairs(testitems)
-                Test.push_testset(testset(relpath(file, path); verbose=verbose))
-                try
-                    for testitem in testitems
-                        Test.push_testset(testset(testitem.name; verbose=verbose))
-                        ts = Test.get_testset()
-                        try
-                            run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
-                        finally
-                            Test.finish(Test.pop_testset())
-                        end
-
-                        if failfast && has_failure(ts)
-                            stop = true
-                            break
-                        end
-                    end
-                finally
-                    Test.finish(Test.pop_testset())
-                end
-
-                stop && break
-            end
-        finally
-            ts = Test.pop_testset()
-            # Outer testset generates report that needs to integrate results from nested (custom) testsets
-            Base.invokelatest(Test.finish, ts)
-        end
-    else
-        ts_1 = testset("Package"; verbose=verbose)
-        Test.@with_testset ts_1 begin
-            for (file, testitems) in pairs(testitems)
-                ts_2 = testset(relpath(file, path); verbose=verbose)
-                Test.@with_testset ts_2 begin
-                    for testitem in testitems
-                        ts_3 = testset(testitem.name; verbose=verbose)
-                        Test.@with_testset ts_3 begin
-                            run_testitem_in_testset(ts_3, testitem, package_name, test_setup_module_set, testsetups)
-                        end
-                        Test.finish(ts_3)
-
-                        if failfast && has_failure(ts_3)
-                            stop = true
-                            break
-                        end
-                    end
-                end
-                Test.finish(ts_2)
-
-                stop && break
-            end
-        end
-        # Outer testset generates report that needs to integrate results from nested (custom) testsets
-        Base.invokelatest(Test.finish, ts_1)
+    with_root_testset(root_ts) do
+        run_node!(root, package_name, test_setup_module_set, testsetups, verbose, failfast, testset)
     end
+
+    return root_ts
 end
 
 """
