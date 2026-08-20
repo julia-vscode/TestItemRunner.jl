@@ -408,7 +408,7 @@ function find_test_files(path)
 end
 
 """
-    run_tests(path; filter=nothing, verbose=false)
+    run_tests(path; filter=nothing, verbose=false, failfast=false, testset=default_testset)
 
 Run all test items in a directory and its subdirectories.
 
@@ -419,8 +419,26 @@ Run all test items in a directory and its subdirectories.
 - `failfast`: Whether to stop the test run after the first test item that fails
   or errors. The remaining test items are then not run at all, so they show up
   in neither the summary nor the counts.
+- `testset`: The test set used for the test sets this function creates around the
+  test items, one per package, per file and per test item. It is called as
+  `testset(description::String; verbose::Bool)` and must return a
+  `Test.AbstractTestSet` that implements `Test.record` and `Test.finish`. Beyond
+  the results of the tests in a test item, the test set of a test item is also
+  given a `Test.Broken` result for a skipped test item and a `Test.Error` result
+  when preparing the test item failed, so it has to handle those as well.
+
+  A custom test set is meant for reporting a test run to something else, a CI
+  system say. Note that it applies only to test runs started from this function
+  or from [`@run_package_tests`](@ref), so typically to `Pkg.test`. Test runs
+  started from the Julia VS Code extension or from `juliati` report their
+  results over their own protocol and are not affected by it.
+
+  Two things move to the custom test set along with the reporting. Whether a run
+  with failures makes the process exit with an error is decided by its
+  `Test.finish` method, and `failfast` only sees a test item fail if the test set
+  keeps its results in a `results` field, the way `Test.DefaultTestSet` does.
 """
-function run_tests(path; filter=nothing, verbose=false, failfast=false)
+function run_tests(path; filter=nothing, verbose=false, failfast=false, testset=default_testset)
     path = abspath(path)
 
     # Find package name
@@ -546,11 +564,12 @@ end
 """
     @run_package_tests(ex...)
 
-Run all test items in a package, using optional filter and verbosity arguments.
+Run all test items in a package, using optional filter, verbosity, failfast and
+test set arguments.
 
 # Usage
 ```julia
-@run_package_tests filter=<filter_function>, verbose=<bool>, failfast=<bool>
+@run_package_tests filter=<filter_function>, verbose=<bool>, failfast=<bool>, testset=<testset>
 ```
 
 ```julia
@@ -562,12 +581,15 @@ Run all test items in a package, using optional filter and verbosity arguments.
 - `verbose`: An optional argument to specify verbosity.
 - `failfast`: An optional argument to stop the run after the first test item
   that fails or errors.
+- `testset`: An optional custom test set, see [`run_tests`](@ref) for the
+  interface it has to implement. It applies only to test runs started from this
+  macro, not to runs started from the Julia VS Code extension or from `juliati`.
 """
 macro run_package_tests(ex...)
     kwargs = []
 
     for i in ex
-        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose, :failfast)
+        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose, :failfast, :testset)
             push!(kwargs, esc(i))
         else
             error("Invalid argument")
@@ -580,9 +602,9 @@ end
 @static if VERSION < v"1.6"
     # verbose keyword not supported before v1.6
     # https://github.com/JuliaLang/julia/commit/68c71f577275a16fffb743b2058afdc2d635068f
-    testset(a...; verbose=false, kw...) = Test.DefaultTestSet(a...; kw...)
+    default_testset(a...; verbose=false, kw...) = Test.DefaultTestSet(a...; kw...)
 else
-    testset(a...; kw...) = Test.DefaultTestSet(a...; kw...)
+    default_testset(a...; kw...) = Test.DefaultTestSet(a...; kw...)
 end
 
 # `Test.Error` formats the value we pass it with whatever the running Julia
