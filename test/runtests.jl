@@ -5,7 +5,12 @@ using TestItems, TestItemRunner
     @test true
 end
 
-@testsetup module TestSetup
+@testitem "@__DIR__ resolves correctly" begin
+    @test @__DIR__() == pwd()
+    @test @__DIR__() == dirname(@__FILE__)
+end
+
+@testmodule TestSetup begin
     const x = 10
     getfloat() = rand()
 end
@@ -15,10 +20,123 @@ end
     @test TestSetup.getfloat() isa Float64
 end
 
-function myfilter(i)
-    for fname in ("TestItemRunner.jl", "runtests.jl", "testitemtree.jl")
-        endswith(i.filename, fname) && return true
-    end
-    return false
+@testitem "skip literal" skip=true begin
+    @test false
 end
-@run_package_tests filter=myfilter verbose=true
+
+@testitem "skip expression" skip=(1 + 1 == 2) begin
+    @test false
+end
+
+@testitem "skip false" skip=false begin
+    @test true
+end
+
+@testitem "skip with other keyword arguments" tags=[:skiptest] setup=[TestSetup] skip=true begin
+    @test false
+end
+
+@testitem "a test item's globals are released once it has run" begin
+    # `run_tests` finishes a root test set, which would otherwise be recorded into the
+    # test set of the test item running it. The test set stack lives in task local
+    # storage and is not inherited, so a fresh task gives the fixture a stack of its own.
+    path = joinpath(@__DIR__, "..", "testdata", "memory")
+
+    printing = Test.TESTSET_PRINT_ENABLE[]
+    Test.TESTSET_PRINT_ENABLE[] = false
+    try
+        task = @async try
+            TestItemRunner.run_tests(path)
+        catch err
+            err
+        end
+        wait(task)
+    finally
+        Test.TESTSET_PRINT_ENABLE[] = printing
+    end
+
+    # The second fixture item is the assertion: it collects and then looks at what the
+    # weak reference the first one parked in `Main` still points at
+    @test isdefined(Main, :TESTITEMRUNNER_MEMORY_PROBE)
+    @test Main.TESTITEMRUNNER_MEMORY_PROBE.value === nothing
+end
+
+@testsnippet FailfastFixture begin
+    # `run_tests` finishes a root test set, which throws when anything failed,
+    # and which would otherwise be recorded into the test set of the test item
+    # that is running it. The test set stack lives in task local storage and is
+    # not inherited, so running the fixture on a fresh task gives it a stack of
+    # its own and keeps its deliberate failure out of our own results.
+    function run_failfast_fixture(; failfast)
+        log = tempname()
+        touch(log)
+
+        path = joinpath(@__DIR__, "..", "testdata", "failfast")
+
+        # The fixture fails on purpose, so its summary and its failure report are
+        # silenced rather than printed into the middle of our own results
+        printing = Test.TESTSET_PRINT_ENABLE[]
+        Test.TESTSET_PRINT_ENABLE[] = false
+
+        try
+            withenv("TESTITEMRUNNER_FAILFAST_LOG" => log) do
+                task = @async try
+                    TestItemRunner.run_tests(path; failfast=failfast)
+                catch err
+                    err
+                end
+                wait(task)
+            end
+
+            return [strip(i) for i in eachline(log) if !isempty(strip(i))]
+        finally
+            Test.TESTSET_PRINT_ENABLE[] = printing
+            rm(log, force=true)
+        end
+    end
+end
+
+@testitem "failfast stops after the first failing test item" setup=[FailfastFixture] begin
+    @test run_failfast_fixture(failfast=true) == ["first", "second"]
+end
+
+@testitem "without failfast every test item runs" setup=[FailfastFixture] begin
+    @test run_failfast_fixture(failfast=false) == ["first", "second", "third"]
+end
+
+@testitem "find_test_files" begin
+    using TestItemRunner: find_test_files
+
+    path = joinpath(@__DIR__, "..", "testdata", "testitemsconfig")
+    files = [replace(relpath(i, path), '\\' => '/') for i in find_test_files(path)]
+
+    @test "included.jl" in files
+
+    # `exclude` in JuliaTestItems.toml drops a folder from the search
+    @test !("excluded/excluded.jl" in files)
+
+    # Folders like node_modules are never descended into
+    @test !("node_modules/ignored.jl" in files)
+
+    # A nested JuliaTestItems.toml governs the settings below it, and its
+    # folder is still searched
+    @test "nested/nested_included.jl" in files
+
+    # The root's `excluded/**` is anchored to the root of the fixture, so it
+    # matches `excluded/` there but not `nested/excluded/` further down
+    @test "nested/excluded/nested_excluded.jl" in files
+
+    # But what the root DOES exclude stays excluded: scope is the intersection
+    # over every enclosing config file, so the JuliaTestItems.toml in `nested`
+    # cannot bring `nested/vetoed` back
+    @test !("nested/vetoed/vetoed.jl" in files)
+
+    @test length(files) == 3
+end
+
+dir = pwd()
+
+@run_package_tests filter=i->endswith(i.filename, "TestItemRunner.jl") || endswith(i.filename, "testitems_config.jl") || endswith(i.filename, "runtests.jl") verbose=true
+
+# Check that @run_package_tests didn't change the working directory
+TestItemRunner.Test.@test pwd() == dir

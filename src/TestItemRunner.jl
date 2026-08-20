@@ -1,34 +1,35 @@
+"""
+    TestItemRunner
+
+This module provides functionalities to run `@testitem` tests in a Julia package,
+as part of the TestItemRunner.jl package. It supports running individual test items,
+which are self-contained units of code written within `@testitem` macros.
+
+# Key Features
+- Provides a mechanism to run individual test items in isolation, ensuring that each
+  test item is executed in a new Julia module.
+- Supports filtering of test items based on custom criteria, and verbose output during testing.
+- Integrates with the base test system, and can be utilized in conjunction with the Julia VS Code
+  extension or as a standalone test runner.
+"""
 module TestItemRunner
 
-include("../packages/Tokenize/src/Tokenize.jl")
-
-module CSTParser
-    using ..Tokenize
-    import ..Tokenize.Tokens
-    import ..Tokenize.Tokens: RawToken, AbstractToken, iskeyword, isliteral, isoperator, untokenize
-    import ..Tokenize.Lexers: Lexer, peekchar, iswhitespace, readchar, emit, emit_error,  accept_batch, eof
-
-    include("../packages/CSTParser/src/packagedef.jl")
-end
-
-include("../packages/JuliaWorkspaces/src/JuliaWorkspaces.jl")
+include("../packages/JuliaSyntax/src/JuliaSyntax.jl")
 
 module TestItemDetection
-    import ..CSTParser
-    using ..CSTParser: EXPR
-    using ..JuliaWorkspaces: JuliaWorkspace
-    using ..JuliaWorkspaces.URIs2: URI
+    import ..JuliaSyntax
+    using ..JuliaSyntax: @K_str, kind, children, SyntaxNode
 
     include("../packages/TestItemDetection/src/packagedef.jl")
 end
 
-import .CSTParser, Test, TestItems, TOML
-using .CSTParser: EXPR, parentof, headof
-using TestItems: @testitem
+import Test, TestItems, TOML
+using TestItems: @testitem, @testmodule, @testsnippet
 
 include("vendored_code.jl")
+include("testitems_config.jl")
 
-export @run_package_tests, @testitem
+export @run_package_tests, @testitem, @testmodule, @testsnippet
 
 function compute_line_column(content, target_pos)
     line = 1
@@ -50,17 +51,18 @@ function compute_line_column(content, target_pos)
 end
 
 @testitem "compute_line_column" begin
+    using TestItemRunner: compute_line_column
     content = "abc\ndef\nghi"
 
-    @test TestItemRunner.compute_line_column(content, 1) == (line=1, column=1)
-    @test TestItemRunner.compute_line_column(content, 2) == (line=1, column=2)
-    @test TestItemRunner.compute_line_column(content, 3) == (line=1, column=3)
-    @test TestItemRunner.compute_line_column(content, 5) == (line=2, column=1)
-    @test TestItemRunner.compute_line_column(content, 6) == (line=2, column=2)
-    @test TestItemRunner.compute_line_column(content, 7) == (line=2, column=3)
-    @test TestItemRunner.compute_line_column(content, 9) == (line=3, column=1)
-    @test TestItemRunner.compute_line_column(content, 10) == (line=3, column=2)
-    @test TestItemRunner.compute_line_column(content, 11) == (line=3, column=3)
+    @test compute_line_column(content, 1) == (line=1, column=1)
+    @test compute_line_column(content, 2) == (line=1, column=2)
+    @test compute_line_column(content, 3) == (line=1, column=3)
+    @test compute_line_column(content, 5) == (line=2, column=1)
+    @test compute_line_column(content, 6) == (line=2, column=2)
+    @test compute_line_column(content, 7) == (line=2, column=3)
+    @test compute_line_column(content, 9) == (line=3, column=1)
+    @test compute_line_column(content, 10) == (line=3, column=2)
+    @test compute_line_column(content, 11) == (line=3, column=3)
 end
 
 struct TestSetupModuleSet
@@ -68,21 +70,123 @@ struct TestSetupModuleSet
     modules::Set{Symbol}
 end
 
-# setup is (filename, code, name, line, column)
-function ensure_evaled(test_setup_module_set, filename, code, name, line, column)
+function ensure_evaled(test_setup_module_set, filename, code, name, line, column, working_dir)
     if !(name in test_setup_module_set.modules)
         mod = Core.eval(test_setup_module_set.setupmodule, :(module $(Symbol(name)) end))
         code = string('\n'^line, ' '^column, code)
-        withpath(filename) do
-            Base.invokelatest(include_string, mod, code, filename)
+        cd(working_dir) do
+            withpath(filename) do
+                Base.invokelatest(include_string, mod, code, filename)
+            end
         end
     end
     push!(test_setup_module_set.modules, name)
     return
 end
 
-function run_testitem(filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set)
+"""
+    evaluate_skip(mod, filepath, skip)
+
+Evaluate the expression of a `skip` keyword argument that was not a `Bool`
+literal, in the module `mod` the test item would run in.
+
+`skip` carries the source text of the expression and its position, so that the
+expression is evaluated with the line numbers it has in the original file.
+"""
+function evaluate_skip(mod, filepath, skip)
+    code = string('\n'^(skip.line-1), ' '^(skip.column-1), skip.code)
+
+    result = cd(dirname(filepath)) do
+        withpath(filepath) do
+            Base.invokelatest(include_string, mod, code, filepath)
+        end
+    end
+
+    result isa Bool || error("The `skip` keyword argument must evaluate to a `Bool`, but it evaluated to a value of type $(typeof(result)).")
+
+    return result
+end
+
+function ensure_setups_evaled(testitem, test_setup_module_set, testsetups)
+    working_dir = dirname(testitem.filename)
+
+    for setup in testitem.option_setup
+        haskey(testsetups, setup) || error("Test setup $(setup) is not defined.")
+
+        testsetup = testsetups[setup]
+
+        if testsetup.kind == :module
+            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column, working_dir)
+        elseif testsetup.kind != :snippet
+            # Snippets are evaluated in the test item's own module by `run_testitem`
+            error("Unknown setup type")
+        end
+    end
+end
+
+"""
+    release_module_globals!(mod)
+
+Point every global in `mod` at `nothing`, so that whatever the test item bound to one
+becomes collectable.
+
+Every test item runs in a module of its own, and Julia cannot unload a module: the module
+stays reachable for the life of the process, and so does everything its globals point at.
+A test item that binds a large array therefore keeps that array alive for the rest of the
+run, which is what #65 reports. The module object itself still leaks — nothing can be done
+about that — but its contents do not have to.
+
+Left alone: `eval`, `include` and the module's own name, which the `module` expression
+created rather than the test item, and submodules, because a `@testmodule` reached through
+one is shared with other test items. Bindings that cannot take `nothing` — a `const` on
+Julia before 1.12, a typed global, a name brought in by `using` — are skipped as they come
+up, because there is nothing else to try for them.
+"""
+function release_module_globals!(mod::Module)
+    for name in names(mod; all=true)
+        (name === :eval || name === :include || name === nameof(mod)) && continue
+        # Names Julia generated itself, for closures, generators and macro hygiene
+        occursin('#', string(name)) && continue
+        isdefined(mod, name) || continue
+
+        try
+            getfield(mod, name) isa Module && continue
+            # `Core.eval` rather than `setglobal!`, which only exists from Julia 1.9 on
+            Core.eval(mod, Expr(:(=), name, nothing))
+        catch
+        end
+    end
+
+    return nothing
+end
+
+@testitem "release_module_globals!" begin
+    using TestItemRunner: release_module_globals!
+
     mod = Core.eval(Main, :(module $(gensym()) end))
+    Base.include_string(mod, "kept = [1, 2, 3]\nconst pinned = 1\n")
+
+    weak = WeakRef(getfield(mod, :kept))
+    release_module_globals!(mod)
+
+    @test getfield(mod, :kept) === nothing
+
+    GC.gc(true)
+    GC.gc(true)
+    @test weak.value === nothing
+
+    # `eval` and `include` belong to the module rather than to the test item
+    @test getfield(mod, :eval) isa Function
+    @test getfield(mod, :include) isa Function
+
+    # A submodule is left alone: a `@testmodule` can be reached through one
+    inner = Core.eval(mod, :(module Inner end))
+    release_module_globals!(mod)
+    @test getfield(mod, :Inner) === inner
+end
+
+function run_testitem(mod, filepath, use_default_usings, setups, package_name, original_code, line, column, test_setup_module_set, testsetups)
+    working_dir = dirname(filepath)
 
     if use_default_usings
         Core.eval(mod, :(using Test))
@@ -93,51 +197,256 @@ function run_testitem(filepath, use_default_usings, setups, package_name, origin
     end
 
     for m in setups
-        Core.eval(mod, Expr(:using, Expr(:., :., :., nameof(test_setup_module_set.setupmodule), m)))
+        setup_details = testsetups[m]
+        if setup_details.kind==:module
+            Core.eval(mod, Expr(:using, Expr(:., :., :., nameof(test_setup_module_set.setupmodule), m)))
+        elseif setup_details.kind==:snippet
+            snippet_code = string('\n'^setup_details.line, ' '^setup_details.column, setup_details.code)
+            cd(working_dir) do
+                withpath(setup_details.filename) do
+                    Base.invokelatest(include_string, mod, snippet_code, setup_details.filename)
+                end
+            end
+        else
+            error("Unknown test setup")
+        end
     end
 
-    code = string('\n'^line, ' '^column, original_code)
+    code = string('\n'^(line-1), ' '^(column-1), original_code)
 
-    withpath(filepath) do
-        Base.invokelatest(include_string, mod, code, filepath)
-    end
-end
-
-mutable struct TestItemTree
-    name  :: String
-    path  :: String
-    nodes :: Dict{String, TestItemTree}
-end
-
-TestItemTree(name, path) = TestItemTree(name, normpath(path), Dict())
-
-function insert_node!(tree::TestItemTree, path::Vector{String})
-    isempty(path) && return
-    name = popfirst!(path)
-    subtree = get!(()->TestItemTree(name, joinpath(tree.path, name)), tree.nodes, name)
-    insert_node!(subtree, path)
-end
-
-insert_node!(tree::TestItemTree, path::String) = insert_node!(tree, splitpath(relpath(path, tree.path)))
-
-function Base.show(io::IO, mime::MIME"text/plain", tree::TestItemTree; indent="")
-    println(io, "$indent- $(tree.name) ($(tree.path))")
-    foreach(values(tree.nodes)) do subtree
-        show(io, mime, subtree; indent=indent*"  ")
+    cd(working_dir) do
+        withpath(filepath) do
+            Base.invokelatest(include_string, mod, code, filepath)
+        end
     end
 end
 
-function simplify!(tree::TestItemTree)
-    foreach(simplify!, values(tree.nodes))
-    if length(tree.nodes) == 1
-        node = first(values(tree.nodes))
-        tree.name  = tree.name == "" ? node.name : "$(tree.name)/$(node.name)"
-        tree.path  = node.path
-        tree.nodes = node.nodes
+"""
+    run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
+
+Run a single test item, recording its result into the test set `ts` that was
+created for it.
+
+A test item that is skipped is recorded as broken, the same result `@test_skip`
+produces, so that skipped test items stay visible in the test summary without
+failing the run. Anything that goes wrong while preparing the test item, be it
+in a test setup or in a `skip` expression, is recorded as an error on the test
+item itself instead of aborting the entire test run.
+"""
+function run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
+    # A literal `skip=true` is honored without creating a module or evaluating
+    # any test setups
+    if testitem.skip === true
+        Test.record(ts, Test.Broken(:skipped, Symbol(testitem.name)))
+        return
     end
+
+    mod = nothing
+
+    try
+        mod = Core.eval(Main, :(module $(gensym()) end))
+
+        # A `skip` expression is evaluated in the module the test item would run
+        # in, but before anything is imported into it, so that checks like
+        # `Sys.iswindows()` see the process the tests actually run in
+        if testitem.skip !== false && evaluate_skip(mod, testitem.filename, testitem.skip)
+            Test.record(ts, Test.Broken(:skipped, Symbol(testitem.name)))
+            return
+        end
+
+        ensure_setups_evaled(testitem, test_setup_module_set, testsetups)
+
+        run_testitem(mod, testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set, testsetups)
+    catch err
+        err isa InterruptException && rethrow()
+        Test.record(ts, Test.Error(:nontest_error, Expr(:tuple), err, current_exception_stack(), LineNumberNode(testitem.line, Symbol(testitem.filename))))
+    finally
+        # `invokelatest` is load bearing: the test item's globals were created by an
+        # `include_string` in a newer world, and from this one `names(mod; all=true)`
+        # does not list them yet, so a direct call would find nothing to release.
+        mod === nothing || Base.invokelatest(release_module_globals!, mod)
+    end
+
+    return
 end
 
-function run_tests(path; filter=nothing, verbose=false)
+"""
+    has_failure(ts)
+
+Whether the test set `ts` recorded a failure or an error, either directly or in
+a test set nested inside it.
+
+This is what `failfast` looks at after each test item. It walks `results` rather
+than asking `Test` for the counts, because the shape of the counts that
+`Test.get_test_counts` returns changed between Julia versions, while `results`
+did not.
+"""
+function has_failure(ts)
+    :results in fieldnames(typeof(ts)) || return false
+
+    for r in ts.results
+        if r isa Test.Fail || r isa Test.Error
+            return true
+        elseif !(r isa Test.Result) && has_failure(r)
+            # Anything recorded that is not a `Test.Result` is a nested test set
+            return true
+        end
+    end
+
+    return false
+end
+
+@testitem "has_failure" begin
+    using TestItemRunner: has_failure
+
+    # The results are pushed rather than recorded, because `Test.record` prints
+    # a failure the moment it sees one, and these are not real failures
+    passed = Test.DefaultTestSet("passed")
+    push!(passed.results, Test.Pass(:test, nothing, nothing, true))
+    @test !has_failure(passed)
+
+    # A `Broken` result is what a skipped test item records, and it must not
+    # count as a failure
+    broken = Test.DefaultTestSet("broken")
+    push!(broken.results, Test.Broken(:skipped, :something))
+    @test !has_failure(broken)
+
+    errored = Test.DefaultTestSet("errored")
+    stack = try
+        error("boom")
+    catch
+        TestItemRunner.current_exception_stack()
+    end
+    push!(errored.results, Test.Error(:nontest_error, Expr(:tuple), ErrorException("boom"), stack, LineNumberNode(1, Symbol(@__FILE__))))
+    @test has_failure(errored)
+
+    # A failure nested one test set deep is still a failure
+    outer = Test.DefaultTestSet("outer")
+    push!(outer.results, errored)
+    @test has_failure(outer)
+
+    # Something without a `results` field is not a test set we can inspect
+    @test !has_failure(nothing)
+end
+
+# The `skip` keyword argument of a test item is reported by TestItemDetection
+# either as a `Bool`, when it was a literal, or as the source range of an
+# expression that has to be evaluated in the test process just before the test
+# item would run. We resolve that range to the source text plus the position it
+# was written at here, while we still have the content of the file at hand.
+function skip_details(content, option_skip)
+    option_skip isa Bool && return option_skip
+
+    return (code=content[option_skip], compute_line_column(content, first(option_skip))...)
+end
+
+# Directory names that are never worth descending into.
+const SKIPPED_DIRNAMES = Set([".git", ".svn", ".hg", "node_modules"])
+
+"""
+    find_test_files(path)
+
+Find all the Julia files in `path` and its subfolders that are searched for test
+items.
+
+Version control and dependency folders are never descended into, and any
+`JuliaTestItems.toml` file that is found scopes which of the remaining files are
+searched, see [`testitems_selected`](@ref). Config files in the directories
+*above* `path` count too, so that searching a subdirectory directly honours the
+same exclusions as searching the whole project.
+"""
+function find_test_files(path)
+    path = abspath(path)
+
+    julia_files = String[]
+    config_files = String[]
+
+    # An explicit walk instead of `walkdir`, because it is hard to stop that from
+    # recursing into the directories we want to skip
+    remaining_dirs = [path]
+    while !isempty(remaining_dirs)
+        dir = popfirst!(remaining_dirs)
+
+        entries = try
+            readdir(dir)
+        catch
+            continue
+        end
+
+        for entry in entries
+            filepath = joinpath(dir, entry)
+
+            descend = try
+                !islink(filepath) && isdir(filepath)
+            catch
+                # Foreign or broken reparse points (for example WSL created
+                # symlinks) make `lstat` throw on Julia 1.11 and later, so we
+                # skip any entry we cannot stat
+                continue
+            end
+
+            if descend
+                if !(entry in SKIPPED_DIRNAMES)
+                    push!(remaining_dirs, filepath)
+                end
+            elseif is_testitems_config_file(entry)
+                push!(config_files, normpath(filepath))
+            else
+                _, ext = splitext(entry)
+                if isvalid(ext) && lowercase(ext) == ".jl"
+                    push!(julia_files, normpath(filepath))
+                end
+            end
+        end
+    end
+
+    # Scope is the intersection over every enclosing config file, so the ones
+    # above `path` matter as much as the ones inside it — otherwise running the
+    # tests of a vendored subpackage directly would see a different set of test
+    # items than the language server shows for the whole project.
+    append!(config_files, _enclosing_config_files(path))
+
+    isempty(config_files) && return julia_files
+
+    configs = Dict{String,PathFilter}(i => parse_testitems_config(i) for i in config_files)
+
+    return Base.filter(i -> testitems_selected(configs, i), julia_files)
+end
+
+# Every `JuliaTestItems.toml` in a strict ancestor directory of `dir`, walking up
+# to the filesystem root.
+function _enclosing_config_files(dir)
+    res = String[]
+
+    current = dirname(dir)
+    while true
+        candidate = joinpath(current, "JuliaTestItems.toml")
+        isfile(candidate) && push!(res, normpath(candidate))
+
+        parent = dirname(current)
+        parent == current && break
+        current = parent
+    end
+
+    return res
+end
+
+"""
+    run_tests(path; filter=nothing, verbose=false)
+
+Run all test items in a directory and its subdirectories.
+
+# Arguments
+- `path`: The path to the directory containing the tests.
+- `filter`: A filter function to apply to the test items.
+- `verbose`: Whether to run the tests in verbose mode.
+- `failfast`: Whether to stop the test run after the first test item that fails
+  or errors. The remaining test items are then not run at all, so they show up
+  in neither the summary nor the counts.
+"""
+function run_tests(path; filter=nothing, verbose=false, failfast=false)
+    path = abspath(path)
+
     # Find package name
     package_name = ""
     package_filename = isfile(joinpath(path, "Project.toml")) ? joinpath(path, "Project.toml") : isfile(joinpath(path, "JuliaProject.toml")) ? joinpath(path, "JuliaProject.toml") : nothing
@@ -150,31 +459,23 @@ function run_tests(path; filter=nothing, verbose=false)
         end
     end
 
-    # Find all Julia files in this folder and sub folders
-    julia_files = String[]
-    for (root, _, files) in walkdir(path)
-        for file in files
-            if endswith(lowercase(file), ".jl")
-                push!(julia_files, normpath(joinpath(root, file)))
-            end
-        end
-
-    end
+    julia_files = find_test_files(path)
 
     # Find all @testitems and @testsetup
     testitems = Dict{String,Vector}()
     # testsetups maps @testsetup NAME => (filename, code, name, line, column)
-    testsetups = Dict{String,Any}()
+    testsetups = Dict{Symbol,Any}()
     for file in julia_files
         content = read(file, String)
-        cst = CSTParser.parse(content, true)
+
+        stream = JuliaSyntax.ParseStream(content; version=VERSION)
+        JuliaSyntax.parse!(stream; rule=:all)
+        tree = JuliaSyntax.build_tree(JuliaSyntax.SyntaxNode, stream)
 
         testitems_for_file = []
         testsetups_for_file = []
         errors_for_file = []
-        for i in cst.args
-            TestItemDetection.find_test_detail!(i, testitems_for_file, testsetups_for_file, errors_for_file)
-        end
+        TestItemDetection.find_test_detail!(tree, testitems_for_file, testsetups_for_file, errors_for_file)
 
         if length(errors_for_file) > 0
             @warn "Error in your test item or test setup definition" file errors=errors_for_file
@@ -182,10 +483,10 @@ function run_tests(path; filter=nothing, verbose=false)
         end
 
         if length(testitems_for_file) > 0
-            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, option_setup=i.option_setup, compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
+            testitems[file] = [(filename=file, code=content[i.code_range], name=i.name, option_tags=i.option_tags, option_default_imports=i.option_default_imports, option_setup=i.option_setup, skip=skip_details(content, i.option_skip), compute_line_column(content, i.code_range.start)...) for i in testitems_for_file]
         end
         for i in testsetups_for_file
-            testsetups[i.name] = (filename=file, code=content[i.code_range], name=Symbol(i.name), compute_line_column(content, i.code_range.start)...)
+            testsetups[i.name] = (filename=file, code=content[i.code_range], name=Symbol(i.name), kind=i.kind, compute_line_column(content, i.code_range.start)...)
         end
     end
 
@@ -197,51 +498,100 @@ function run_tests(path; filter=nothing, verbose=false)
         end
     end
 
-    # Populate the TestItemTree
-    tree = TestItemTree(!isempty(package_name) ? package_name : path, path)
-    for path in keys(testitems)
-        insert_node!(tree, path)
-    end
-    simplify!(tree)
-
     # Run testitems
     test_setup_module = Core.eval(Main, :(module $(gensym()) end))
     test_setup_module_set = TestSetupModuleSet(test_setup_module, Set{Symbol}())
 
-    function run_tree(tree)
-        Test.push_testset(testset(tree.name; verbose=verbose))
-        if isempty(tree.nodes)
-            for testitem in testitems[tree.path]
-                if !isempty(testitem.option_setup)
-                    for setup in testitem.option_setup
-                        key = String(setup)
-                        if haskey(testsetups, key)
-                            testsetup = testsetups[key]
-                            ensure_evaled(test_setup_module_set, testsetup.filename, testsetup.code, testsetup.name, testsetup.line, testsetup.column)
-                        else
-                            error("Test setup $(setup) is not defined.")
+    # Set once `failfast` has seen a test item fail, to unwind out of both loops
+    # while still finishing every test set that is already open, so that the
+    # summary of the partial run still prints.
+    stop = false
+
+    @static if VERSION ≤ v"1.13-"
+        Test.push_testset(testset("Package"; verbose=verbose))
+        try
+            for (file, testitems) in pairs(testitems)
+                Test.push_testset(testset(relpath(file, path); verbose=verbose))
+                try
+                    for testitem in testitems
+                        Test.push_testset(testset(testitem.name; verbose=verbose))
+                        ts = Test.get_testset()
+                        try
+                            run_testitem_in_testset(ts, testitem, package_name, test_setup_module_set, testsetups)
+                        finally
+                            Test.finish(Test.pop_testset())
+                        end
+
+                        if failfast && has_failure(ts)
+                            stop = true
+                            break
+                        end
+                    end
+                finally
+                    Test.finish(Test.pop_testset())
+                end
+
+                stop && break
+            end
+        finally
+            ts = Test.pop_testset()
+            # Outer testset generates report that needs to integrate results from nested (custom) testsets
+            Base.invokelatest(Test.finish, ts)
+        end
+    else
+        ts_1 = testset("Package"; verbose=verbose)
+        Test.@with_testset ts_1 begin
+            for (file, testitems) in pairs(testitems)
+                ts_2 = testset(relpath(file, path); verbose=verbose)
+                Test.@with_testset ts_2 begin
+                    for testitem in testitems
+                        ts_3 = testset(testitem.name; verbose=verbose)
+                        Test.@with_testset ts_3 begin
+                            run_testitem_in_testset(ts_3, testitem, package_name, test_setup_module_set, testsetups)
+                        end
+                        Test.finish(ts_3)
+
+                        if failfast && has_failure(ts_3)
+                            stop = true
+                            break
                         end
                     end
                 end
-                Test.push_testset(testset(testitem.name; verbose=verbose))
-                run_testitem(testitem.filename, testitem.option_default_imports, testitem.option_setup, package_name, testitem.code, testitem.line, testitem.column, test_setup_module_set)
-                Test.finish(Test.pop_testset())
-            end
-        else
-            foreach(sort!(collect(keys(tree.nodes)))) do key
-                run_tree(tree.nodes[key])
+                Test.finish(ts_2)
+
+                stop && break
             end
         end
-        Test.finish(Test.pop_testset())
+        # Outer testset generates report that needs to integrate results from nested (custom) testsets
+        Base.invokelatest(Test.finish, ts_1)
     end
-    run_tree(tree)
 end
 
+"""
+    @run_package_tests(ex...)
+
+Run all test items in a package, using optional filter and verbosity arguments.
+
+# Usage
+```julia
+@run_package_tests filter=<filter_function>, verbose=<bool>, failfast=<bool>
+```
+
+```julia
+@run_package_tests filter=ti->!(:skipci in ti.tags)
+```
+
+# Arguments
+- `filter`: An optional filter function to apply to the test items.
+- `verbose`: An optional argument to specify verbosity.
+- `failfast`: An optional argument to stop the run after the first test item
+  that fails or errors.
+"""
 macro run_package_tests(ex...)
     kwargs = []
 
     for i in ex
-        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose)
+        if i isa Expr && i.head==:(=) && length(i.args)==2 && i.args[1] in (:filter, :verbose, :failfast)
             push!(kwargs, esc(i))
         else
             error("Invalid argument")
@@ -257,6 +607,36 @@ end
     testset(a...; verbose=false, kw...) = Test.DefaultTestSet(a...; kw...)
 else
     testset(a...; kw...) = Test.DefaultTestSet(a...; kw...)
+end
+
+# `Test.Error` formats the value we pass it with whatever the running Julia
+# version knows how to print: a plain backtrace before v1.2, an exception stack
+# from v1.2 on, which was then renamed from `catch_stack` to `current_exceptions`
+# in v1.7. Note that those two boundaries are not the same version, so this
+# cannot be a two way shim. Each branch passes what that version's own Test
+# stdlib passes when it records an error.
+@static if VERSION ≥ v"1.7"
+    current_exception_stack() = Base.current_exceptions()
+elseif VERSION ≥ v"1.2"
+    current_exception_stack() = Base.catch_stack()
+else
+    current_exception_stack() = catch_backtrace()
+end
+
+@testitem "current_exception_stack" begin
+    using TestItemRunner: current_exception_stack
+
+    stack = try
+        error("boom")
+    catch
+        current_exception_stack()
+    end
+
+    # Test.Error formats the stack when it is constructed, so building one is
+    # what actually shows that we handed it the shape this Julia version wants
+    err = Test.Error(:nontest_error, Expr(:tuple), ErrorException("boom"), stack, LineNumberNode(1, Symbol(@__FILE__)))
+
+    @test err isa Test.Error
 end
 
 end
