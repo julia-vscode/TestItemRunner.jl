@@ -12,10 +12,10 @@
 # `@run_package_tests` runs. In particular, scope is the intersection over the
 # whole chain of enclosing config files: a nested `JuliaTestItems.toml` may
 # narrow discovery further, but it can never resurrect a subtree an enclosing
-# config excluded. `find_test_files` therefore also collects config files in the
-# directories *above* the tree it is asked to search, so that running the tests
-# of a vendored subpackage directly sees the same exclusions the language server
-# does.
+# config excluded. Each side roots that chain at the tree it is given — a
+# workspace folder for the language server, `path` for `find_test_files` — so
+# pointing the runner at a subdirectory scopes discovery to that subdirectory,
+# exactly as opening it as a workspace folder would.
 
 # ── Glob matching ───────────────────────────────────────────────────────────
 
