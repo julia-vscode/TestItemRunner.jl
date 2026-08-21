@@ -36,71 +36,82 @@ end
     @test false
 end
 
-@testitem "a test item's globals are released once it has run" begin
-    # `run_tests` finishes a root test set, which would otherwise be recorded into the
-    # test set of the test item running it. The test set stack lives in task local
-    # storage and is not inherited, so a fresh task gives the fixture a stack of its own.
-    path = joinpath(@__DIR__, "..", "testdata", "memory")
-
-    printing = Test.TESTSET_PRINT_ENABLE[]
-    Test.TESTSET_PRINT_ENABLE[] = false
-    try
-        task = @async try
-            TestItemRunner.run_tests(path)
-        catch err
-            err
-        end
-        wait(task)
-    finally
-        Test.TESTSET_PRINT_ENABLE[] = printing
+@testsnippet NestedRun begin
+    # Several test items run a whole `run_tests` of their own over a fixture package. That
+    # nested run finishes a root test set, which would otherwise be recorded into the test
+    # set of the test item running it — a fixture that fails on purpose would then fail us
+    # too, and every fixture would print its summary into the middle of our results.
+    #
+    # A test set that only collects what it is given, and that does not record itself into
+    # its parent when it finishes, is what keeps the two runs apart: nothing reaches the
+    # enclosing test set, nothing is printed and `run_tests` does not throw. It is the same
+    # `testset=` hook the "custom testset" test item covers.
+    #
+    # The older approach — running the nested `run_tests` on a fresh task — relied on the
+    # test set stack living in task local storage, which is no longer true: Julia 1.13
+    # moved it to a `ScopedValue`, and scoped values *are* inherited by child tasks.
+    mutable struct QuietTestSet <: Test.AbstractTestSet
+        description::String
+        results::Vector{Any}
     end
 
-    # The second fixture item is the assertion: it collects and then looks at what the
-    # weak reference the first one parked in `Main` still points at
-    @test isdefined(Main, :TESTITEMRUNNER_MEMORY_PROBE)
-    @test Main.TESTITEMRUNNER_MEMORY_PROBE.value === nothing
-end
+    QuietTestSet(description; verbose=false) = QuietTestSet(description, [])
 
-@testsnippet FailfastFixture begin
-    # `run_tests` finishes a root test set, which throws when anything failed,
-    # and which would otherwise be recorded into the test set of the test item
-    # that is running it. The test set stack lives in task local storage and is
-    # not inherited, so running the fixture on a fresh task gives it a stack of
-    # its own and keeps its deliberate failure out of our own results.
+    const finished_testsets = QuietTestSet[]
+
+    Test.record(ts::QuietTestSet, result) = (push!(ts.results, result); result)
+    Test.finish(ts::QuietTestSet) = (push!(finished_testsets, ts); ts)
+
+    """
+        run_nested(path; kwargs...)
+
+    Run every test item under `path` in a run of its own and return the test sets it
+    finished, keyed by description.
+    """
+    function run_nested(path; kwargs...)
+        empty!(finished_testsets)
+        TestItemRunner.run_tests(path; testset=QuietTestSet, kwargs...)
+
+        return Dict(ts.description => ts for ts in finished_testsets)
+    end
+
     function run_failfast_fixture(; failfast)
         log = tempname()
         touch(log)
 
         path = joinpath(@__DIR__, "..", "testdata", "failfast")
 
-        # The fixture fails on purpose, so its summary and its failure report are
-        # silenced rather than printed into the middle of our own results
-        printing = Test.TESTSET_PRINT_ENABLE[]
-        Test.TESTSET_PRINT_ENABLE[] = false
-
         try
+            # Every fixture item appends its name to the log, so the log is what ran
             withenv("TESTITEMRUNNER_FAILFAST_LOG" => log) do
-                task = @async try
-                    TestItemRunner.run_tests(path; failfast=failfast)
-                catch err
-                    err
-                end
-                wait(task)
+                run_nested(path; failfast=failfast)
             end
 
             return [strip(i) for i in eachline(log) if !isempty(strip(i))]
         finally
-            Test.TESTSET_PRINT_ENABLE[] = printing
             rm(log, force=true)
         end
     end
 end
 
-@testitem "failfast stops after the first failing test item" setup=[FailfastFixture] begin
+@testitem "a test item's globals are released once it has run" setup=[NestedRun] begin
+    finished = run_nested(joinpath(@__DIR__, "..", "testdata", "memory"))
+
+    # The second fixture item is the assertion: it collects and then looks at what the
+    # weak reference the first one parked in `Main` still points at. Its verdict is read
+    # from its test set rather than repeated here, because the probe is a binding created
+    # after this test item started running, which this item's world does not have to see.
+    checks = finished["memory probe: check"].results
+
+    @test length(checks) == 2
+    @test all(i -> i isa Test.Pass, checks)
+end
+
+@testitem "failfast stops after the first failing test item" setup=[NestedRun] begin
     @test run_failfast_fixture(failfast=true) == ["first", "second"]
 end
 
-@testitem "without failfast every test item runs" setup=[FailfastFixture] begin
+@testitem "without failfast every test item runs" setup=[NestedRun] begin
     @test run_failfast_fixture(failfast=false) == ["first", "second", "third"]
 end
 
